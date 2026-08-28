@@ -1,5 +1,5 @@
 import { useBoardStore } from "@/lib/board-store";
-import type { Ticket, WorkflowColumn } from "@/lib/types";
+import type { AgentResponse, Ticket, WorkflowColumn } from "@/lib/types";
 import { RunLog } from "./RunLog";
 
 export function ExecutionTrail({
@@ -7,7 +7,6 @@ export function ExecutionTrail({
   columns,
 }: {
   tickets: Ticket[];
-  stageId?: string;
   columns: WorkflowColumn[];
 }) {
   const flowId = useBoardStore((s) => s.config.activeFlowId);
@@ -18,25 +17,40 @@ export function ExecutionTrail({
       .filter(([, v]) => v.trim())
       .map(([k, v]) => ({ ticket: t.key, k, v })),
   );
-  const history = flowRuns.map((r) => ({
-    id: r.id,
-    at: r.at,
-    columnId: r.columnId,
-    summary: `${r.ticketKey} · ${r.summary}${r.variable ? ` · {{${r.variable}}}` : ""}`,
-    body: r.output,
-    via: r.via,
-    ok: r.ok,
-    error: r.error,
-  }));
-  const fallback = tickets.flatMap((t) => t.agentResponses);
-  const responses = history.length ? history : fallback;
+
+  const seen = new Set<string>();
+  const responses: AgentResponse[] = [];
+  for (const r of flowRuns) {
+    const key = `${r.ticketId}|${r.columnId}|${r.at}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    responses.push({
+      id: r.id,
+      at: r.at,
+      columnId: r.columnId,
+      summary: `${r.ticketKey} · ${r.summary}${r.variable ? ` · {{${r.variable}}}` : ""}`,
+      body: r.output,
+      via: r.via,
+      ok: r.ok,
+      error: r.error,
+    });
+  }
+  for (const t of tickets) {
+    for (const r of t.agentResponses) {
+      const key = `${t.id}|${r.columnId}|${r.at}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      responses.push({ ...r, summary: `${t.key} · ${r.summary}` });
+    }
+  }
+  responses.sort((a, b) => (a.at < b.at ? 1 : -1));
 
   return (
-    <section className="mt-6 flex flex-col gap-4">
+    <section className="flex flex-col gap-4">
       <div>
         <h2 className="font-serif text-lg font-medium tracking-tight">This pipeline</h2>
         <p className="mb-2 text-2xs text-muted">
-          Every run on the active flow stays here until you switch flows or reset. Current variables, then the full history.
+          Full history for the active flow. Switching stages does not clear it.
         </p>
         {vars.length === 0 ? (
           <p className="text-sm text-muted">No variables yet.</p>

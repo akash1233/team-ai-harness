@@ -36,7 +36,7 @@ export function TicketList() {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4 md:px-8">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-4 md:px-8">
         <div className="min-w-0">
           <p className="text-micro uppercase tracking-widest text-subtle">
             {col
@@ -47,7 +47,7 @@ export function TicketList() {
           </p>
           <h1 className="font-serif text-3xl font-medium tracking-tight md:text-4xl">{col?.label || col?.name || "Stage"}</h1>
           <p className="mt-2 max-w-xl text-sm text-muted">
-            Run from the board. The last agent reply is the variable. Logs and variables stay on this page.
+            This pane is the current stage. Run history below stays for the whole pipeline.
           </p>
         </div>
         {runnable ? (
@@ -60,9 +60,9 @@ export function TicketList() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-8">
         {inStage.length === 0 ? (
-          <div className="flex min-h-24 items-end rounded-lg border border-dashed border-border px-6 py-8">
+          <div className="flex min-h-20 items-end rounded-lg border border-dashed border-border px-6 py-6">
             <p className="max-w-sm text-sm text-muted">
-              Nothing in this stage yet. Start creates a ticket, runs the prompt, and prints the output here.
+              Nothing waiting in this stage. Earlier runs stay in history below.
             </p>
           </div>
         ) : (
@@ -79,6 +79,8 @@ export function TicketList() {
             ))}
           </ul>
         )}
+      </div>
+      <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-border px-4 py-3 md:px-8">
         <div className="max-w-2xl">
           <ExecutionTrail tickets={inFlow} columns={config.columns} />
         </div>
@@ -101,9 +103,14 @@ function TicketCard({
   const config = useBoardStore((s) => s.config);
   const owner = config.members.find((m) => m.id === ticket.ownerId);
   const failed = ticket.status === "blocked";
-  const last = ticket.agentResponses.find((r) => r.columnId === stageId);
+  const last = ticket.agentResponses.find((r) => r.columnId === stageId) ?? ticket.agentResponses[0];
   const writes = outputVarName(config.columns.find((c) => c.id === stageId));
-  const output = (writes && ticket.vars?.[writes]) || ticket.outputs[stageId] || last?.body || ticket.liveLog || "";
+  const output =
+    (writes && ticket.vars?.[writes]) ||
+    ticket.outputs[stageId] ||
+    last?.body ||
+    ticket.liveLog ||
+    "";
   const vars = Object.entries(ticket.vars ?? {}).filter(([, v]) => v.trim());
   const error = ticket.blockedReason || (last?.ok === false ? last.error || last.body : "");
 

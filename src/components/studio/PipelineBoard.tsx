@@ -26,6 +26,13 @@ export function PipelineBoard() {
         <div className="flex h-full min-w-max gap-3 px-3 py-3 md:px-5">
         {columns.map((col, i) => {
           const here = inFlow.filter((t) => t.columnId === col.id);
+          const lastRun = inFlow
+            .flatMap((t) => t.agentResponses.filter((r) => r.columnId === col.id))
+            .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+          const lastOutput =
+            lastRun?.body ||
+            inFlow.map((t) => t.outputs[col.id]).find((v) => v?.trim()) ||
+            "";
           const step = resolveStep(col, execution);
           const agent = col.agent && col.agent !== "inherit" ? shortAgent(step.kind) : null;
           const failed =
@@ -35,9 +42,6 @@ export function PipelineBoard() {
                 inFlow.some((t) => t.agentResponses.some((r) => r.columnId === col.id && r.ok === false));
           const runnable = col.role === "prompt" || col.role === "plan" || col.role === "review" || col.role === "approve";
           const busy = here.some((t) => t.status === "executing");
-          const lastRun = inFlow
-            .flatMap((t) => t.agentResponses.filter((r) => r.columnId === col.id))
-            .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
 
           return (
             <section
@@ -107,7 +111,13 @@ export function PipelineBoard() {
               </header>
               <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
                 {here.length === 0 ? (
-                  <p className="text-2xs text-subtle">Drop a ticket here.</p>
+                  lastOutput ? (
+                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-sm border border-border bg-inset p-2 text-2xs text-fg">
+                      {lastOutput}
+                    </pre>
+                  ) : (
+                    <p className="text-2xs text-subtle">Drop a ticket here.</p>
+                  )
                 ) : (
                   here.map((ticket) => (
                     <TicketNote

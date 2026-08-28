@@ -9,6 +9,7 @@ import { WorkPanel } from "@/components/board/WorkPanel";
 import { NewTicketDialog } from "@/components/board/NewTicketDialog";
 import { StageRail } from "./StageRail";
 import { TicketList } from "./TicketList";
+import { PipelineBoard } from "./PipelineBoard";
 import { TeamSettings } from "./TeamSettings";
 
 export function Studio() {
@@ -100,8 +101,14 @@ export function Studio() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <StageRail />
-        <TicketList />
+        {config.pipelineLayout === "horizontal" ? (
+          <PipelineBoard />
+        ) : (
+          <>
+            <StageRail />
+            <TicketList />
+          </>
+        )}
         {selected ? (
           <div className="fixed inset-0 z-30 bg-surface md:static md:z-auto md:h-full md:w-96 md:border-l md:border-border">
             <WorkPanel />

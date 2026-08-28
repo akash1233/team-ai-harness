@@ -90,6 +90,32 @@ html[data-density="compact"] .ticket-doc {
   padding: 0.75rem 1rem;
 }
 
+.ticket-note {
+  position: relative;
+  padding: 1rem 1rem 0.85rem;
+  box-shadow: 0 1px 0 var(--color-border), 0 10px 24px -18px rgb(28 29 25 / 0.45);
+}
+
+.ticket-note-tape {
+  display: block;
+  height: 0.35rem;
+  margin: -1rem -1rem 0.75rem;
+  background: var(--color-accent);
+  opacity: 0.55;
+}
+
+html[data-theme="ink"] .ticket-note {
+  box-shadow: 0 1px 0 var(--color-border), 0 12px 28px -16px rgb(0 0 0 / 0.55);
+}
+
+html[data-density="compact"] .ticket-note {
+  padding: 0.7rem 0.75rem 0.65rem;
+}
+
+html[data-density="compact"] .ticket-note-tape {
+  margin: -0.7rem -0.75rem 0.55rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

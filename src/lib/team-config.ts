@@ -105,6 +105,7 @@ export function createDefaultTeam(): TeamConfig {
     docs: DEFAULT_DOCS.map((d) => ({ ...d })),
     theme: "paper",
     density: "comfortable",
+    pipelineLayout: "vertical",
     showSpend: true,
     autoAdvance: active.autoAdvance,
     execution: createDefaultExecution(),
@@ -225,5 +226,6 @@ export function mergeTeamConfig(saved?: Partial<TeamConfig>): TeamConfig {
     flows,
     activeFlowId,
     columns: flows.find((f) => f.id === activeFlowId)?.columns ?? d.columns,
+    pipelineLayout: saved.pipelineLayout === "horizontal" || saved.pipelineLayout === "vertical" ? saved.pipelineLayout : d.pipelineLayout,
   });
 }

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { cn } from "@/lib/cn";
-import type { AgentKind, AgentTarget, ColumnRole, DensityId, StepAgent, ThemeId } from "@/lib/types";
+import type { AgentKind, AgentTarget, ColumnRole, DensityId, PipelineLayout, StepAgent, ThemeId } from "@/lib/types";
 import { createDefaultExecution, executionLabel } from "@/lib/team-config";
 import { AGENT_KINDS } from "@/lib/agents";
 import { testExecution } from "@/lib/discovery-agent";
@@ -788,6 +788,28 @@ function LookTab() {
 
   return (
     <div className="flex flex-col gap-6">
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">Pipeline</legend>
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            ["vertical", "Vertical", "One stage at a time. Rail on the left."],
+            ["horizontal", "Horizontal", "Sticky-note board. Every stage, every field."],
+          ] as const satisfies ReadonlyArray<readonly [PipelineLayout, string, string]>).map(([id, label, hint]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => patchConfig({ pipelineLayout: id })}
+              className={cn(
+                "h-24 rounded-lg border px-4 text-left",
+                config.pipelineLayout === id ? "border-accent" : "border-border",
+              )}
+            >
+              <span className="font-serif text-lg">{label}</span>
+              <span className="mt-1 block text-2xs text-muted">{hint}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
       <fieldset>
         <legend className="mb-2 text-sm font-medium">Theme</legend>
         <div className="grid grid-cols-2 gap-2">

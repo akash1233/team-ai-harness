@@ -12,6 +12,7 @@ export type RailTone = "run" | "review" | "gate" | "idle" | "blocked";
 
 export type ThemeId = "paper" | "ink";
 export type DensityId = "comfortable" | "compact";
+export type PipelineLayout = "vertical" | "horizontal";
 
 export type ExecutionProvider = "local" | "studio" | "cis";
 export type LocalAgent = "cursor" | "claude";
@@ -153,6 +154,7 @@ export type TeamConfig = {
   docs: TeamDoc[];
   theme: ThemeId;
   density: DensityId;
+  pipelineLayout: PipelineLayout;
   showSpend: boolean;
   autoAdvance: boolean;
   execution: ExecutionConfig;

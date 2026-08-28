@@ -1,6 +1,6 @@
 import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
-import { DISCOVERY_FLOW_ID } from "@/lib/columns";
+import { DISCOVERY_FLOW_ID, BLOCKED_COLUMN_ID } from "@/lib/columns";
 import { resolveStep, shortAgent } from "@/lib/agents";
 
 export function StageRail() {
@@ -19,7 +19,13 @@ export function StageRail() {
       className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-2 md:h-full md:w-56 md:flex-col md:overflow-y-auto md:border-r md:border-b-0 md:px-3 md:py-4"
     >
       {columns.map((col, i) => {
-        const count = inFlow.filter((t) => t.columnId === col.id).length;
+        const here = inFlow.filter((t) => t.columnId === col.id);
+        const count = here.length;
+        const failed =
+          col.id === BLOCKED_COLUMN_ID
+            ? count > 0
+            : here.some((t) => t.status === "blocked") ||
+              inFlow.some((t) => t.agentResponses.some((r) => r.columnId === col.id && r.ok === false));
         const active = col.id === activeStageId;
         const agent =
           col.agent && col.agent !== "inherit" ? shortAgent(resolveStep(col, execution).kind) : null;
@@ -39,23 +45,29 @@ export function StageRail() {
             }}
             className={cn(
               "flex min-h-11 min-w-36 items-center gap-2 rounded-md px-3 text-left md:min-w-0 md:w-full",
-              active ? "bg-accent text-accent-fg" : "text-muted hover:bg-inset hover:text-fg",
+              active && failed
+                ? "bg-danger text-danger-fg"
+                : active
+                  ? "bg-accent text-accent-fg"
+                  : failed
+                    ? "text-danger hover:bg-danger/10"
+                    : "text-muted hover:bg-inset hover:text-fg",
               !col.enabled && "opacity-50",
             )}
           >
-            <span className={cn("font-mono text-micro tabular-nums", active ? "text-accent-fg/70" : "text-subtle")}>
+            <span className={cn("font-mono text-micro tabular-nums", active ? (failed ? "text-danger-fg/70" : "text-accent-fg/70") : failed ? "text-danger" : "text-subtle")}>
               {String(i + 1).padStart(2, "0")}
             </span>
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{col.label}</span>
             {agent ? (
-              <span className={cn("hidden font-mono text-micro md:inline", active ? "text-accent-fg/80" : "text-subtle")}>
+              <span className={cn("hidden font-mono text-micro md:inline", active ? (failed ? "text-danger-fg/80" : "text-accent-fg/80") : "text-subtle")}>
                 {agent}
               </span>
             ) : null}
             <span
               className={cn(
                 "font-mono text-micro tabular-nums",
-                active ? "text-accent-fg/80" : "text-subtle",
+                active ? (failed ? "text-danger-fg/80" : "text-accent-fg/80") : failed ? "text-danger" : "text-subtle",
               )}
             >
               {count}

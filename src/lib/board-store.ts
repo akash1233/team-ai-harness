@@ -48,6 +48,7 @@ type BoardState = {
   advance: (id: string) => void;
   approve: (id: string) => void;
   block: (id: string, reason: string) => void;
+  failTicket: (id: string, reason: string, columnId?: string, via?: string) => void;
   runColumn: (columnId: string) => Promise<void>;
   runTicket: (id: string) => Promise<void>;
   submitGrill: (id: string, answers: Record<number, string>) => Promise<void>;
@@ -61,6 +62,7 @@ type BoardState = {
   addColumn: () => void;
   removeColumn: (id: string) => void;
   addMember: (member: Omit<TeamMember, "id">) => void;
+  updateMember: (id: string, patch: Partial<Omit<TeamMember, "id">>) => void;
   removeMember: (id: string) => void;
   addLabel: (label: string) => void;
   removeLabel: (label: string) => void;
@@ -263,12 +265,51 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   block: (id, reason) => {
     set({
-      tickets: withTicket(get().tickets, id, {
+      tickets: withTicket(get().tickets, id, (t) => ({
+        ...t,
         columnId: BLOCKED_COLUMN_ID,
         status: "blocked",
         blockedReason: reason,
-      }),
+        agentResponses: [
+          {
+            id: uid("resp"),
+            at: new Date().toISOString(),
+            columnId: t.columnId,
+            summary: "Moved to Blocked",
+            body: reason,
+            ok: false,
+            error: reason,
+          },
+          ...t.agentResponses,
+        ],
+      })),
       activeStageId: BLOCKED_COLUMN_ID,
+    });
+    get().persist();
+  },
+
+  failTicket: (id, reason, columnId, via) => {
+    const ticket = get().tickets.find((t) => t.id === id);
+    const col = columnId || ticket?.columnId || "";
+    set({
+      tickets: withTicket(get().tickets, id, (t) => ({
+        ...t,
+        status: "blocked",
+        blockedReason: reason,
+        agentResponses: [
+          {
+            id: uid("resp"),
+            at: new Date().toISOString(),
+            columnId: col || t.columnId,
+            summary: via ? `Failed · ${via}` : "Failed",
+            body: reason,
+            via,
+            ok: false,
+            error: reason,
+          },
+          ...t.agentResponses,
+        ],
+      })),
     });
     get().persist();
   },
@@ -355,11 +396,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       });
 
       if (!result.ok) {
-        get().block(id, result.error);
+        get().failTicket(id, result.error, latest.columnId, result.via);
         return;
       }
       if (result.blocked) {
-        get().block(id, result.blocked);
+        get().failTicket(id, result.blocked, latest.columnId, result.via);
         return;
       }
 
@@ -371,6 +412,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         summary: result.via ? `${result.summary} · ${result.via}` : result.summary,
         body: result.text,
         via: result.via,
+        ok: true,
       };
 
       set({
@@ -427,7 +469,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       await get().continueAfter(id);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Agent failed";
-      get().block(id, message);
+      get().failTicket(id, message, get().tickets.find((t) => t.id === id)?.columnId ?? "");
     }
   },
 
@@ -469,7 +511,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         },
       });
       if (!result.ok) {
-        get().block(id, result.error);
+        get().failTicket(id, result.error, FRY_COLUMN_ID, result.via);
         return;
       }
       const spendDelta = result.spend ?? 0.06;
@@ -484,6 +526,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
             : "Grill round",
         body: result.text,
         via: result.via,
+        ok: true,
       };
       set({
         tickets: withTicket(get().tickets, id, (t) => {
@@ -527,7 +570,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       else get().persist();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Grill failed";
-      get().block(id, message);
+      get().failTicket(id, message, FRY_COLUMN_ID);
     }
   },
 
@@ -596,18 +639,32 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   addMember: (member) => {
+    const id = uid("mem");
     set({
       config: {
         ...get().config,
-        members: [...get().config.members, { ...member, id: uid("mem") }],
+        members: [...get().config.members, { ...member, id }],
+      },
+      activeMemberId: get().config.members.length === 0 ? id : get().activeMemberId,
+    });
+    get().persist();
+  },
+
+  updateMember: (id, patch) => {
+    set({
+      config: {
+        ...get().config,
+        members: get().config.members.map((m) => (m.id === id ? { ...m, ...patch } : m)),
       },
     });
     get().persist();
   },
 
   removeMember: (id) => {
+    const members = get().config.members.filter((m) => m.id !== id);
     set({
-      config: { ...get().config, members: get().config.members.filter((m) => m.id !== id) },
+      config: { ...get().config, members },
+      activeMemberId: get().activeMemberId === id ? members[0]?.id ?? "" : get().activeMemberId,
     });
     get().persist();
   },

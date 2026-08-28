@@ -49,6 +49,8 @@ export type AgentResponse = {
   summary: string;
   body: string;
   via?: string;
+  ok?: boolean;
+  error?: string;
 };
 
 export type GrillQuestion = {

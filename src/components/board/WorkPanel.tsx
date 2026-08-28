@@ -10,6 +10,7 @@ import { channelLabel, formatSpend } from "@/lib/format";
 import { resolveStep } from "@/lib/agents";
 import { formatGrillRecord } from "@/lib/grill";
 import { GrillRoom } from "@/components/studio/GrillRoom";
+import { RunLog } from "@/components/studio/RunLog";
 import type { Ticket } from "@/lib/types";
 
 export function WorkPanel() {
@@ -48,8 +49,17 @@ export function WorkPanel() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <p className="mb-4 text-sm leading-relaxed text-muted">{ticket.description}</p>
+        {ticket.status === "blocked" && ticket.blockedReason ? (
+          <pre className="mb-4 overflow-auto whitespace-pre-wrap rounded-md border border-danger/50 bg-danger/5 p-3 font-mono text-2xs text-danger">
+            {ticket.blockedReason}
+          </pre>
+        ) : null}
         <FlowVars ticket={ticket} />
         <StepBody ticket={ticket} />
+        <section className="mt-6">
+          <h3 className="mb-2 font-serif text-base font-medium">Agent log</h3>
+          <RunLog responses={ticket.agentResponses} columns={config.columns} />
+        </section>
       </div>
     </aside>
   );

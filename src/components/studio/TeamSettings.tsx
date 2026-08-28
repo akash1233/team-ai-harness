@@ -81,6 +81,7 @@ function TeamTab() {
   const config = useBoardStore((s) => s.config);
   const patchConfig = useBoardStore((s) => s.patchConfig);
   const addMember = useBoardStore((s) => s.addMember);
+  const updateMember = useBoardStore((s) => s.updateMember);
   const removeMember = useBoardStore((s) => s.removeMember);
   const addLabel = useBoardStore((s) => s.addLabel);
   const removeLabel = useBoardStore((s) => s.removeLabel);
@@ -120,15 +121,32 @@ function TeamTab() {
 
       <section>
         <h3 className="mb-2 text-sm font-medium">People</h3>
-        <ul className="divide-y divide-border rounded-md border border-border">
+        <p className="mb-2 text-2xs text-muted">
+          Edit names, Slack handles, and roles. They drive Working as, Grill assignment, and who to notify.
+        </p>
+        <ul className="flex flex-col gap-2">
           {config.members.map((m) => (
-            <li key={m.id} className="flex items-center gap-3 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm">{m.name}</p>
-                <p className="font-mono text-micro text-subtle">
-                  {m.handle} · {m.role}
-                </p>
-              </div>
+            <li key={m.id} className="grid gap-2 rounded-md border border-border p-2 sm:grid-cols-[1fr_8rem_8rem_auto]">
+              <Input
+                value={m.name}
+                aria-label={`${m.name} name`}
+                onChange={(e) => updateMember(m.id, { name: e.target.value })}
+              />
+              <Input
+                className="font-mono"
+                value={m.handle}
+                aria-label={`${m.name} handle`}
+                onChange={(e) =>
+                  updateMember(m.id, {
+                    handle: e.target.value.startsWith("@") ? e.target.value : `@${e.target.value.replace(/^@+/, "")}`,
+                  })
+                }
+              />
+              <Input
+                value={m.role}
+                aria-label={`${m.name} role`}
+                onChange={(e) => updateMember(m.id, { role: e.target.value })}
+              />
               <button
                 type="button"
                 className="flex size-11 items-center justify-center text-subtle hover:text-danger"

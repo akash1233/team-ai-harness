@@ -28,7 +28,7 @@ export type AgentResult =
       grill?: { frontierEmpty: boolean; questions: GrillQuestion[] };
       via?: string;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; via?: string };
 
 type AgentInput = {
   ticket: Ticket;
@@ -244,7 +244,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
     const fb = fallbackFor(ticket, columnId, grillSubmit);
     const useDemo = !live.ok && (execution?.demoFallbacks ?? true);
     if (!live.ok && !useDemo) {
-      return { ok: false, error: live.error || "Agent failed" };
+      return { ok: false, error: live.error || "Agent failed", via: live.via };
     }
     const text = live.ok && live.text.trim() ? live.text.trim() : fb.text;
     const via = live.ok ? live.via : "demo";

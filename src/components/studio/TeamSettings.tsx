@@ -988,15 +988,15 @@ function ExecutionTab() {
         <Field label="Print-mode flags (non-interactive)">
           <Input
             className="font-mono"
-            value={exec.cursorExtraArgs ?? "--trust"}
+            value={exec.cursorExtraArgs ?? ""}
             onChange={(e) => patch({ cursorExtraArgs: e.target.value })}
           />
         </Field>
         <Field label="Test model (cheapest ping)">
           <Input
             className="font-mono"
-            value={exec.cursorTestModel ?? ""}
-            placeholder="agent default"
+            value={exec.cursorTestModel ?? "auto"}
+            placeholder="auto"
             onChange={(e) => patch({ cursorTestModel: e.target.value })}
           />
         </Field>

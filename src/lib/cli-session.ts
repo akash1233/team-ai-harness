@@ -5,7 +5,7 @@ export function withNonInteractiveFlags(
   extraLine = "",
 ): string[] {
   const extra = extraLine.trim().split(/\s+/).filter(Boolean);
-  const defaults = kind === "cursor" ? ["--trust"] : ["--permission-mode", "default"];
+  const defaults = kind === "cursor" ? [] : ["--permission-mode", "default"];
   const add = extra.length ? extra : defaults;
   const have = new Set(args);
   const missing: string[] = [];
@@ -78,8 +78,23 @@ export function stripAnsi(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
 }
 
+export function resolveCursorModel(raw?: string): string {
+  const m = (raw || "").trim();
+  if (!m || /^composer-1(\.|$)/i.test(m) || m === "composer-1") return "auto";
+  return m;
+}
+
+export function withCursorWorkspace(args: string[], workspace: string): string[] {
+  if (!workspace || args.includes("--workspace")) return args;
+  return ["--workspace", workspace, ...args];
+}
+
 export function explainCliFailure(text: string): string {
   const plain = stripAnsi(text);
+  if (/Cannot use this model:\s*(\S+)/i.test(plain)) {
+    const hit = plain.match(/Cannot use this model:\s*(\S+)/i)?.[1];
+    return `Cursor rejected model ${hit}. Kindling now defaults to auto. Set Test model to auto, composer-2.5, or gpt-5.4-nano-low.`;
+  }
   if (/Auto mode is allowed only in dev containers|UserPromptSubmit operation blocked/i.test(plain)) {
     return "Workday Claude blocked auto mode (--permission-mode dontAsk). Kindling now runs print mode without auto. Answer any trust prompt in Terminal, then re-run.";
   }
@@ -87,7 +102,7 @@ export function explainCliFailure(text: string): string {
     return "Claude is waiting on the workspace trust prompt in Terminal. Type yes there, then re-run the test.";
   }
   if (/Workspace Trust Required|Do you trust the contents of this directory/i.test(plain)) {
-    return "Cursor blocked on workspace trust. Kindling passes --trust -f. If Terminal still asks, confirm once.";
+    return "Cursor blocked on workspace trust. Confirm once in Terminal. Kindling does not pass --force; permissions come from .cursor/permissions.json.";
   }
   if (/permission|allow this|yes\/no/i.test(plain) && /claude/i.test(plain)) {
     return "Claude asked for permission in Terminal. Answer there — Kindling captures the log.";
@@ -97,7 +112,7 @@ export function explainCliFailure(text: string): string {
 
 export function sessionShouldStop(text: string): boolean {
   const plain = stripAnsi(text);
-  return /UserPromptSubmit operation blocked|Auto mode is allowed only in dev containers|Quick safety check|Workspace Trust Required|Do you trust the contents of this directory/i.test(
+  return /UserPromptSubmit operation blocked|Auto mode is allowed only in dev containers|Quick safety check|Workspace Trust Required|Do you trust the contents of this directory|Cannot use this model/i.test(
     plain,
   );
 }
@@ -180,6 +195,7 @@ export async function startMacSession(
   cwd: string,
   bin: string,
   args: string[],
+  prompt?: string,
 ): Promise<{ dir: string; outFile: string; codeFile: string }> {
   const fs = await import("node:fs/promises");
   const os = await import("node:os");
@@ -188,9 +204,15 @@ export async function startMacSession(
   const outFile = path.join(dir, "out.txt");
   const codeFile = path.join(dir, "code.txt");
   const script = path.join(dir, "run.command");
+  const promptFile = path.join(dir, "prompt.md");
   const startedFile = path.join(dir, "started.txt");
   await fs.writeFile(startedFile, String(Date.now()));
-  await fs.writeFile(outFile, `[kindling] ${new Date().toISOString()} starting\n[kindling] ${bin} ${args.join(" ")}\n`);
+  const promptArg = prompt !== undefined ? ` "$(cat ${shellQuote(promptFile)})"` : "";
+  if (prompt !== undefined) await fs.writeFile(promptFile, prompt);
+  await fs.writeFile(
+    outFile,
+    `[kindling] ${new Date().toISOString()} starting\n[kindling] ${bin} ${args.join(" ")}${prompt !== undefined ? " $(cat prompt.md)" : ""}\n`,
+  );
   const body = `#!/bin/bash
 unset npm_config_prefix
 unset NPM_CONFIG_PREFIX
@@ -198,7 +220,7 @@ export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 set -o pipefail
 cd ${shellQuote(cwd)}
 echo "[kindling] $(date -u +%H:%M:%S) print session in $(pwd)" | tee -a ${shellQuote(outFile)}
-${shellQuote(bin)} ${args.map(shellQuote).join(" ")} 2>&1 | tee -a ${shellQuote(outFile)}
+${shellQuote(bin)} ${args.map(shellQuote).join(" ")}${promptArg} 2>&1 | tee -a ${shellQuote(outFile)}
 echo $? > ${shellQuote(codeFile)}
 echo "[kindling] $(date -u +%H:%M:%S) exit $(cat ${shellQuote(codeFile)})" | tee -a ${shellQuote(outFile)}
 `;
@@ -235,8 +257,9 @@ export async function runInMacTerminal(
   bin: string,
   args: string[],
   timeoutMs: number,
+  prompt?: string,
 ): Promise<{ code: number | null; out: string; err: string }> {
-  const { dir } = await startMacSession(cwd, bin, args);
+  const { dir } = await startMacSession(cwd, bin, args, prompt);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const snap = await readSession(dir);
@@ -269,12 +292,14 @@ export async function runAgentProcess(opts: {
   timeoutMs: number;
   inTerminal: boolean;
   fullAgent?: boolean;
+  prompt?: string;
 }): Promise<{ code: number | null; out: string; err: string; via: "terminal" | "spawn" }> {
   const args = opts.fullAgent ? opts.args : withoutFullAgentMode(opts.args);
   if (opts.inTerminal && process.platform === "darwin") {
-    const r = await runInMacTerminal(opts.cwd, opts.bin, args, opts.timeoutMs);
+    const r = await runInMacTerminal(opts.cwd, opts.bin, args, opts.timeoutMs, opts.prompt);
     return { ...r, out: stripAnsi(r.out), err: stripAnsi(r.err), via: "terminal" };
   }
-  const r = await runProcess(opts.bin, args, opts.timeoutMs, opts.cwd);
+  const argv = opts.prompt !== undefined ? [...args, opts.prompt] : args;
+  const r = await runProcess(opts.bin, argv, opts.timeoutMs, opts.cwd);
   return { ...r, out: stripAnsi(r.out), err: stripAnsi(r.err), via: "spawn" };
 }

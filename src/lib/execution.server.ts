@@ -6,10 +6,12 @@ import {
   explainCliFailure,
   isNoiseLog,
   readSession,
+  resolveCursorModel,
   runAgentProcess,
   runProcess,
   sessionShouldStop,
   startMacSession,
+  withCursorWorkspace,
   withNonInteractiveFlags,
   withoutFullAgentMode,
 } from "./cli-session";
@@ -232,16 +234,22 @@ async function invokeCli(
     return { ok: false, text: "", via, error: `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.` };
   }
   const flags = (() => {
-    const base = withNonInteractiveFlags(
+    let base = withNonInteractiveFlags(
       kind,
       [...args, ...extraArgs],
       kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
     );
-    return exec.fullAgentMode ? base : ensurePrintMode(withoutFullAgentMode(base));
+    if (!exec.fullAgentMode) base = ensurePrintMode(withoutFullAgentMode(base));
+    if (kind === "cursor") base = withCursorWorkspace(base, workspaceOf(exec));
+    if (kind === "claude" && !base.includes("--session-id")) {
+      base = ["--session-id", crypto.randomUUID(), ...base];
+    }
+    return base;
   })();
   const raw = await runAgentProcess({
     bin: found,
-    args: [...flags, prompt],
+    args: flags,
+    prompt,
     cwd: workspaceOf(exec),
     timeoutMs: timeoutMs ?? exec.timeoutMs,
     inTerminal: Boolean(exec.runInTerminal),
@@ -580,7 +588,7 @@ async function pingAgent(
   const model =
     located.kind === "claude"
       ? exec.claudeTestModel?.trim() || "haiku"
-      : exec.cursorTestModel?.trim() || "composer-1";
+      : resolveCursorModel(exec.cursorTestModel);
   const extra = model ? ["--model", model] : [];
   const result = await invokeCli(
     exec,
@@ -909,27 +917,34 @@ export async function startAgentTest(opts: {
   }
   const prompt = (opts.prompt || "Reply with exactly: pong").trim();
   const model =
-    step.kind === "claude" ? exec.claudeTestModel?.trim() : exec.cursorTestModel?.trim();
+    step.kind === "claude"
+      ? exec.claudeTestModel?.trim() || "haiku"
+      : resolveCursorModel(exec.cursorTestModel);
   let args: string[];
+  let promptText: string | undefined;
   if (opts.mcp && (opts.mode !== "run" || Boolean(opts.mcpServer))) {
     args = opts.mcpServer?.trim() ? ["mcp", "get", opts.mcpServer.trim()] : ["mcp", "list"];
   } else {
     const extra = model ? ["--model", model] : [];
-    const built = withNonInteractiveFlags(
+    let built = withNonInteractiveFlags(
       step.kind,
       [...located.args, ...extra],
       step.kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
     );
-    const flags = exec.fullAgentMode ? built : ensurePrintMode(withoutFullAgentMode(built));
-    args = [...flags, opts.mcp ? `List your MCP tools, then: ${prompt}` : prompt];
+    if (!exec.fullAgentMode) built = ensurePrintMode(withoutFullAgentMode(built));
+    if (step.kind === "cursor") built = withCursorWorkspace(built, workspaceOf(exec));
+    args = built;
+    promptText = opts.mcp ? `List your MCP tools, then: ${prompt}` : prompt;
   }
   if (!exec.runInTerminal || process.platform !== "darwin") {
     const raw = await runAgentProcess({
       bin: located.found.path,
       args,
+      prompt: promptText,
       cwd: workspaceOf(exec),
       timeoutMs: 25000,
       inTerminal: false,
+      fullAgent: Boolean(exec.fullAgentMode),
     });
     const log = raw.out || raw.err;
     const ok = raw.code === 0 && !isNoiseLog(log);
@@ -950,7 +965,7 @@ export async function startAgentTest(opts: {
       log,
     };
   }
-  const session = await startMacSession(workspaceOf(exec), located.found.path, args);
+  const session = await startMacSession(workspaceOf(exec), located.found.path, args, promptText);
   return {
     ok: probe.ok,
     via: step.label,

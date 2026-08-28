@@ -220,12 +220,12 @@ export function nextColumnId(
   if (columnId === BLOCKED_COLUMN_ID) return null;
   const pipeline = columns.filter((c) => c.id !== BLOCKED_COLUMN_ID);
   const i = pipeline.findIndex((c) => c.id === columnId);
-  if (i < 0) return DONE_COLUMN_ID;
+  if (i < 0) return null;
   for (let j = i + 1; j < pipeline.length; j++) {
     const col = pipeline[j];
     if (col && (col.enabled || col.id === DONE_COLUMN_ID)) return col.id;
   }
-  return DONE_COLUMN_ID;
+  return pipeline.some((c) => c.id === DONE_COLUMN_ID) ? DONE_COLUMN_ID : null;
 }
 
 export const PIPELINE_IDS = COLUMNS.filter((c) => c.id !== BLOCKED_COLUMN_ID).map(

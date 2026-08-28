@@ -4,6 +4,7 @@ import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
 import { DISCOVERY_FLOW_ID, BLOCKED_COLUMN_ID } from "@/lib/columns";
 import { resolveStep, shortAgent } from "@/lib/agents";
+import { ExecutionTrail } from "./ExecutionTrail";
 import { TicketNote } from "./TicketNote";
 
 export function PipelineBoard() {
@@ -20,8 +21,9 @@ export function PipelineBoard() {
   const inFlow = tickets.filter((t) => (t.flowId || DISCOVERY_FLOW_ID) === flowId);
 
   return (
-    <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden bg-bg">
-      <div className="flex h-full min-w-max gap-3 px-3 py-3 md:px-5">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg">
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+        <div className="flex h-full min-w-max gap-3 px-3 py-3 md:px-5">
         {columns.map((col, i) => {
           const here = inFlow.filter((t) => t.columnId === col.id);
           const step = resolveStep(col, execution);
@@ -123,6 +125,10 @@ export function PipelineBoard() {
             </section>
           );
         })}
+        </div>
+      </div>
+      <div className="max-h-[40%] shrink-0 overflow-y-auto border-t border-border px-4 py-3">
+        <ExecutionTrail tickets={inFlow} columns={columns} />
       </div>
     </div>
   );

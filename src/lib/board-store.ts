@@ -356,6 +356,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       ticket = get().tickets.find((t) => t.id === id);
     }
     if (!ticket) return;
+    get().select(ticket.id);
     if (col.role === "review" || col.role === "approve") {
       get().approve(ticket.id);
       return;

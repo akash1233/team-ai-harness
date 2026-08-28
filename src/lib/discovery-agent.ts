@@ -277,22 +277,33 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
 
 export const testExecution = createServerFn({ method: "POST" })
   .validator((input: { execution?: ExecutionConfig; stepAgent?: StepAgent }) => input)
-  .handler(async ({ data }): Promise<{ ok: boolean; via: string; text: string; error?: string }> => {
-    try {
-      const { probeModel } = await import("./execution.server");
-      const result = await probeModel(data.execution, data.stepAgent);
-      return {
-        ok: result.ok,
-        via: result.via,
-        text: result.text.slice(0, 240),
-        error: result.error,
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        via: "executor",
-        text: "",
-        error: err instanceof Error ? err.message : "Probe failed",
-      };
-    }
-  });
+  .handler(
+    async ({
+      data,
+    }): Promise<{
+      ok: boolean;
+      via: string;
+      text: string;
+      error?: string;
+      checks?: { ok: boolean; label: string; detail: string }[];
+    }> => {
+      try {
+        const { probeSetup } = await import("./execution.server");
+        const result = await probeSetup(data.execution, data.stepAgent);
+        return {
+          ok: result.ok,
+          via: result.via,
+          text: result.text.slice(0, 400),
+          error: result.error,
+          checks: result.checks,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          via: "executor",
+          text: "",
+          error: err instanceof Error ? err.message : "Setup check failed",
+        };
+      }
+    },
+  );

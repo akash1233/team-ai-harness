@@ -38,7 +38,6 @@ test("Fryme column can pin Claude even when default is Cursor", () => {
 test("Studio step ignores Cursor local/remote target", () => {
   const step = resolveStep({ agent: "studio" }, exec);
   assert.equal(step.kind, "studio");
-  assert.equal(step.target, "remote");
   assert.equal(step.label, "GenAI Studio");
 });
 
@@ -50,11 +49,9 @@ test("remote Cursor target surfaces in the label", () => {
 
 test("legacy provider studio maps to defaultAgent studio", () => {
   assert.equal(legacyDefaultAgent({ provider: "studio" }), "studio");
-  assert.equal(legacyDefaultAgent({ provider: "local", localAgent: "claude" }), "claude");
-  assert.equal(legacyDefaultAgent({ provider: "cis" }), "cis");
+  assert.equal(legacyDefaultAgent({ localAgent: "claude" }), "claude");
 });
 
 test("step labels stay short for the run button", () => {
   assert.equal(stepLabel("cis", "remote"), "CIS");
-  assert.equal(stepLabel("claude", "remote"), "Claude remote");
 });

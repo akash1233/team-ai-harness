@@ -29,7 +29,7 @@ Then **Team → Execution** and follow the Mac agent steps on that page.
 
 ## Hook up Cursor / Claude on a Mac
 
-The harness spawns a CLI. Until `agent` or `claude` is on PATH, **Test default agent** will say the binary is missing.
+The harness spawns a CLI. Until `agent` or `claude` is on PATH, **Test setup** will fail the CLI check.
 
 **Cursor Agent**
 
@@ -61,7 +61,7 @@ claude --version
 Then:
 
 1. Quit and re-run `npm run dev` **from the same Terminal** (Finder-launched Node will not see your zsh PATH).
-2. **Team → Execution → Test default agent** should print a path under `~/.local/bin`.
+2. **Team → Execution → Test setup** should show Pass for the CLI path and `--version`.
 3. Uncheck **Use demo text if the agent is offline**.
 
 Optional: point **Local HTTP sidecar** at an OpenAI-compatible server (`http://127.0.0.1:11434/v1`) instead of spawning a CLI.

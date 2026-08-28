@@ -109,7 +109,33 @@ function pickText(value: unknown): string {
   return "";
 }
 
-function parseCommand(line: string): { bin: string; args: string[] } {
+export type SetupCheck = {
+  ok: boolean;
+  label: string;
+  detail: string;
+};
+
+export type SetupReport = {
+  ok: boolean;
+  via: string;
+  text: string;
+  error?: string;
+  checks: SetupCheck[];
+};
+
+function extraBinDirs(): string[] {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const dirs = [
+    home ? `${home}/.local/bin` : "",
+    home ? `${home}/bin` : "",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+  ];
+  return dirs.filter(Boolean);
+}
+
+export function parseCommand(line: string): { bin: string; args: string[] } {
   const parts = line.trim().split(/\s+/).filter(Boolean);
   return { bin: parts[0] || "agent", args: parts.slice(1) };
 }
@@ -434,43 +460,241 @@ export async function runModel(opts: {
 }
 
 async function lookupBin(bin: string): Promise<string | null> {
+  const hit = await locateBin(bin);
+  return hit?.path ?? null;
+}
+
+async function locateBin(bin: string): Promise<{ path: string; onPath: boolean } | null> {
   const { existsSync } = await import("node:fs");
   const { delimiter, join } = await import("node:path");
   if (!bin) return null;
-  if (bin.includes("/") || bin.includes("\\")) return existsSync(bin) ? bin : null;
-  for (const dir of (process.env.PATH || "").split(delimiter)) {
-    if (!dir) continue;
+  if (bin.includes("/") || bin.includes("\\")) {
+    return existsSync(bin) ? { path: bin, onPath: true } : null;
+  }
+  const pathDirs = (process.env.PATH || "").split(delimiter).filter(Boolean);
+  for (const dir of pathDirs) {
     const candidate = join(dir, bin);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) return { path: candidate, onPath: true };
+  }
+  for (const dir of extraBinDirs()) {
+    if (pathDirs.includes(dir)) continue;
+    const candidate = join(dir, bin);
+    if (existsSync(candidate)) return { path: candidate, onPath: false };
   }
   return null;
 }
 
-async function whichBin(bin: string): Promise<string | null> {
-  return lookupBin(bin);
+async function runVersion(binPath: string): Promise<{ ok: boolean; text: string }> {
+  const { spawn } = await import("node:child_process");
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean, text: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok, text: text.trim().slice(0, 240) });
+    };
+    let child: import("node:child_process").ChildProcess;
+    try {
+      child = spawn(binPath, ["--version"], {
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      finish(false, err instanceof Error ? err.message : String(err));
+      return;
+    }
+    let out = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(false, `${binPath} --version timed out`);
+    }, 5000);
+    child.stdout?.on("data", (d: Buffer) => {
+      out += d.toString();
+    });
+    child.stderr?.on("data", (d: Buffer) => {
+      out += d.toString();
+    });
+    child.on("error", (e) => finish(false, e.message));
+    child.on("close", (code) => {
+      const text = out.trim();
+      if (text) finish(true, text.split("\n")[0] || text);
+      else finish(code === 0, `exit ${code}`);
+    });
+  });
+}
+
+const CURSOR_ALIASES = ["agent", "cursor-agent", "cursor"];
+const CLAUDE_ALIASES = ["claude"];
+
+export async function probeSetup(execution?: ExecutionConfig, stepAgent?: StepAgent): Promise<SetupReport> {
+  const exec = { ...resolveExecution(execution), timeoutMs: 8000 };
+  const step = resolveStep({ agent: stepAgent ?? "inherit" }, exec);
+  const checks: SetupCheck[] = [];
+  const via = step.label;
+
+  checks.push({
+    ok: true,
+    label: "Default agent",
+    detail: `${via}${exec.demoFallbacks ? " · demo fallbacks are still on" : ""}`,
+  });
+
+  if (exec.demoFallbacks) {
+    checks.push({
+      ok: true,
+      label: "Demo fallbacks",
+      detail: "On — canned text if the agent fails. Turn off after this setup check passes.",
+    });
+  } else {
+    checks.push({
+      ok: true,
+      label: "Demo fallbacks",
+      detail: "Off — a missing agent will fail closed instead of inventing output.",
+    });
+  }
+
+  if (step.kind === "studio" || step.kind === "cis") {
+    const base = exec.studioBaseUrl.trim();
+    checks.push({
+      ok: Boolean(base),
+      label: "Studio base URL",
+      detail: base || "Set the GenAI Studio host (no trailing slash).",
+    });
+    checks.push({
+      ok: Boolean(exec.featureKey.trim()),
+      label: "Feature key",
+      detail: exec.featureKey.trim()
+        ? "wd-pca-feature-key is set (your user id, not an API token)."
+        : "Set wd-pca-feature-key to your user id.",
+    });
+    if (step.kind === "studio") {
+      checks.push({
+        ok: Boolean(exec.promptId.trim()),
+        label: "Prompt ID",
+        detail: exec.promptId.trim() || "Copy Prompt ID from GenAI Studio (File → Copy Prompt ID).",
+      });
+    } else {
+      checks.push({
+        ok: Boolean(exec.cisModel.trim()),
+        label: "CIS model",
+        detail: exec.cisModel.trim() || "Set the CIS / Bedrock model id.",
+      });
+    }
+    if (base) {
+      try {
+        const url = new URL(base);
+        checks.push({
+          ok: url.protocol === "http:" || url.protocol === "https:",
+          label: "URL shape",
+          detail: `${url.protocol}//${url.host}`,
+        });
+      } catch {
+        checks.push({ ok: false, label: "URL shape", detail: "Base URL is not a valid http(s) URL." });
+      }
+    }
+  } else if (step.target === "remote") {
+    const remoteUrl = (step.kind === "claude" ? exec.claudeRemoteUrl : exec.cursorRemoteUrl).trim();
+    checks.push({
+      ok: Boolean(remoteUrl),
+      label: "Remote URL",
+      detail: remoteUrl || `Set the ${step.kind === "claude" ? "Claude" : "Cursor"} remote URL.`,
+    });
+    if (remoteUrl) {
+      try {
+        const url = new URL(remoteUrl);
+        checks.push({
+          ok: url.protocol === "http:" || url.protocol === "https:",
+          label: "URL shape",
+          detail: `${url.protocol}//${url.host}${url.pathname}`,
+        });
+      } catch {
+        checks.push({ ok: false, label: "URL shape", detail: "Remote URL is not a valid http(s) URL." });
+      }
+    }
+  } else if (exec.localHttpUrl.trim()) {
+    const sidecar = exec.localHttpUrl.trim();
+    try {
+      const url = new URL(chatCompletionsUrl(sidecar));
+      checks.push({
+        ok: true,
+        label: "Local HTTP sidecar",
+        detail: url.toString(),
+      });
+    } catch {
+      checks.push({ ok: false, label: "Local HTTP sidecar", detail: "Sidecar URL is not valid." });
+    }
+  } else {
+    const line = step.kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
+    const { bin } = parseCommand(line);
+    const aliases = step.kind === "claude" ? CLAUDE_ALIASES : CURSOR_ALIASES;
+    const names = [bin, ...aliases.filter((a) => a !== bin)];
+    let found: { path: string; onPath: boolean; name: string } | null = null;
+    for (const name of names) {
+      const hit = await locateBin(name);
+      if (hit) {
+        found = { ...hit, name };
+        break;
+      }
+    }
+    if (!found) {
+      checks.push({
+        ok: false,
+        label: "CLI on this machine",
+        detail: `\`${bin}\` was not on PATH or in ~/.local/bin, /opt/homebrew/bin, /usr/local/bin. Install the CLI, then restart npm run dev from Terminal.`,
+      });
+    } else {
+      if (found.name !== bin) {
+        checks.push({
+          ok: false,
+          label: "CLI command",
+          detail: `Configured \`${bin}\` is missing. Found \`${found.name}\` at ${found.path}. Set the local command to: ${found.name} -p --output-format text`,
+        });
+      } else if (!found.onPath) {
+        checks.push({
+          ok: true,
+          label: "CLI on this machine",
+          detail: `Found at ${found.path} (not on Node PATH). Runs will use this path. Add ~/.local/bin to ~/.zshrc so shells see it too.`,
+        });
+      } else {
+        checks.push({
+          ok: true,
+          label: "CLI on this machine",
+          detail: `Found ${found.name} at ${found.path}`,
+        });
+      }
+      const ver = await runVersion(found.path);
+      checks.push({
+        ok: ver.ok,
+        label: `${found.name} --version`,
+        detail: ver.ok ? ver.text : ver.text || "CLI did not print a version. Open a Terminal and run it yourself.",
+      });
+    }
+  }
+
+  const failed = checks.filter((c) => !c.ok);
+  const ok = failed.length === 0;
+  const text = ok
+    ? checks
+        .filter((c) => c.ok)
+        .map((c) => c.detail)
+        .slice(0, 2)
+        .join(" · ")
+    : failed[0]?.detail || "Setup incomplete";
+  return {
+    ok,
+    via,
+    text,
+    error: ok ? undefined : text,
+    checks,
+  };
 }
 
 export async function probeModel(execution?: ExecutionConfig, stepAgent?: StepAgent): Promise<ModelCall> {
-  const exec = { ...resolveExecution(execution), timeoutMs: 8000 };
-  const step = resolveStep({ agent: stepAgent ?? "inherit" }, exec);
-  if ((step.kind === "cursor" || step.kind === "claude") && step.target === "local" && !exec.localHttpUrl.trim()) {
-    const line = step.kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
-    const { bin } = parseCommand(line);
-    const via = step.label;
-    const found = await whichBin(bin);
-    if (found) return { ok: true, text: `Found ${bin} at ${found}`, via };
-    return {
-      ok: false,
-      text: "",
-      via,
-      error: `${via}: \`${bin}\` is not on PATH. Install the CLI, set a local HTTP URL, or switch this stage to remote / Studio.`,
-    };
-  }
-  return runModel({
-    system: "You are a connectivity probe. Reply with exactly: pong",
-    user: "ping",
-    maxTokens: 16,
-    execution: exec,
-    stepAgent,
-  });
+  const report = await probeSetup(execution, stepAgent);
+  return {
+    ok: report.ok,
+    via: report.via,
+    text: report.text,
+    error: report.error,
+  };
 }

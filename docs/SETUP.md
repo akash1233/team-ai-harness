@@ -67,7 +67,7 @@ claude --version
 ### After install
 
 1. Stop the harness (`Ctrl+C`) and run `npm run dev` again in that same shell.
-2. **Team → Execution → Test default agent**.
+2. **Team → Execution → Test setup**.
 3. You want a path like `/Users/you/.local/bin/agent`, not “not on PATH”.
 4. Uncheck **Use demo text if the agent is offline**.
 
@@ -93,7 +93,7 @@ Restart the dev server after changing env.
 
 ## First-run checklist
 
-1. Open the app → **Team → Execution**. Follow the Mac steps, then **Test default agent**.
+1. Open the app → **Team → Execution**. Follow the Mac steps, then **Test setup**.
 2. **Pipeline**: Agenda/Spec = Cursor, Grill/Backlog = Claude (shipped defaults).
 3. **Docs**: Grill Me skill + Discovery conventions.
 4. Run Spec on a ticket, then Start grill. Answer as the person in **Working as**.

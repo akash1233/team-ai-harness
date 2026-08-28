@@ -528,7 +528,7 @@ function MacAgentHints() {
         <li>
           <p className="font-medium">Test, then turn off demo text</p>
           <p className="text-2xs text-muted">
-            Use Test default agent. You want a path under <span className="font-mono">~/.local/bin</span>. Then uncheck demo fallbacks so Grill Me actually calls the CLI.
+            Use Test setup. You want a path plus a --version line, not “not on PATH”. Then uncheck demo fallbacks.
           </p>
         </li>
       </ol>
@@ -548,7 +548,13 @@ function ExecutionTab() {
   const config = useBoardStore((s) => s.config);
   const patchConfig = useBoardStore((s) => s.patchConfig);
   const exec = config.execution ?? createDefaultExecution();
-  const [probe, setProbe] = useState<{ ok: boolean; via: string; text: string; error?: string } | null>(null);
+  const [probe, setProbe] = useState<{
+    ok: boolean;
+    via: string;
+    text: string;
+    error?: string;
+    checks?: { ok: boolean; label: string; detail: string }[];
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   function patch(partial: Partial<typeof exec>) {
@@ -557,7 +563,7 @@ function ExecutionTab() {
 
   async function test() {
     setBusy(true);
-    setProbe({ ok: true, via: executionLabel(exec), text: "Calling executor…" });
+    setProbe({ ok: true, via: executionLabel(exec), text: "Checking setup…" });
     try {
       const result = await testExecution({ data: { execution: exec, stepAgent: "inherit" } });
       setProbe(result);
@@ -566,7 +572,7 @@ function ExecutionTab() {
         ok: false,
         via: executionLabel(exec),
         text: "",
-        error: err instanceof Error ? err.message : "Probe failed",
+        error: err instanceof Error ? err.message : "Setup check failed",
       });
     } finally {
       setBusy(false);
@@ -576,7 +582,7 @@ function ExecutionTab() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        On a Mac the harness spawns Cursor or Claude from this machine. Install the CLI, put it on PATH, then Test. Pipeline still pins which agent each stage uses.
+        Test setup checks that the default agent is installed and callable from this app — not a Discovery ticket. Pipeline still pins Cursor, Claude, Studio, or CIS per stage.
       </p>
       <MacAgentHints />
       {exec.demoFallbacks ? (
@@ -591,9 +597,9 @@ function ExecutionTab() {
           onClick={() => void test()}
           className="inline-flex h-11 items-center rounded-md bg-accent px-4 text-sm font-medium text-accent-fg disabled:opacity-40"
         >
-          {busy ? "Probing…" : "Test default agent"}
+          {busy ? "Checking…" : "Test setup"}
         </button>
-        <span className="text-2xs text-muted">Default is {executionLabel(exec)}.</span>
+        <span className="text-2xs text-muted">Checks {executionLabel(exec)}.</span>
       </div>
       {probe ? (
         <div
@@ -603,8 +609,20 @@ function ExecutionTab() {
             probe.ok ? "border-border text-fg" : "border-danger text-danger",
           )}
         >
-          <p>{probe.ok ? `${probe.via}: ${probe.text || "ok"}` : probe.error || "Failed"}</p>
-          {!probe.ok && /PATH|not on PATH/i.test(probe.error || "") ? (
+          <p className="font-medium">{probe.ok ? `Setup looks good · ${probe.via}` : `Setup incomplete · ${probe.via}`}</p>
+          {probe.checks?.length ? (
+            <ul className="mt-2 flex flex-col gap-2">
+              {probe.checks.map((c) => (
+                <li key={c.label} className="text-2xs">
+                  <span className={cn("font-medium", c.ok ? "text-fg" : "text-danger")}>{c.ok ? "Pass" : "Fail"} · {c.label}</span>
+                  <span className="mt-0.5 block text-muted">{c.detail}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1">{probe.ok ? probe.text || "ok" : probe.error || "Failed"}</p>
+          )}
+          {!probe.ok && /PATH|not on PATH|not on Node PATH/i.test(probe.error || probe.text || "") ? (
             <p className="mt-2 text-2xs text-muted">
               Mac: add <span className="font-mono">~/.local/bin</span> to <span className="font-mono">~/.zshrc</span>, open a new Terminal, run <span className="font-mono">npm run dev</span> from there. If the binary is <span className="font-mono">cursor-agent</span>, change the Cursor command below.
             </p>

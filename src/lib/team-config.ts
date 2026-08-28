@@ -88,6 +88,10 @@ export function createDefaultExecution(): ExecutionConfig {
     pricing: mergePricing(),
     claudeTestModel: "haiku",
     cursorTestModel: "composer-1",
+    workspaceDir: "",
+    cursorExtraArgs: "--trust -f",
+    claudeExtraArgs: "--permission-mode dontAsk",
+    runInTerminal: true,
     provider: "local",
     localAgent: "cursor",
   };

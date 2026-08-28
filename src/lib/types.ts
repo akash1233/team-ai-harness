@@ -61,6 +61,14 @@ export type ExecutionConfig = {
   claudeTestModel?: string;
   /** Cheapest model used by Test run (Cursor `--model`). */
   cursorTestModel?: string;
+  /** Project dir the CLI runs in (workspace trust). Empty = process cwd. */
+  workspaceDir?: string;
+  /** Extra print-mode flags. Cursor default: --trust -f */
+  cursorExtraArgs?: string;
+  /** Extra print-mode flags. Claude default: --permission-mode dontAsk */
+  claudeExtraArgs?: string;
+  /** Mac: open Terminal.app in the background so you can watch the session. */
+  runInTerminal?: boolean;
   /** @deprecated hydrated from older workspaces */
   provider?: ExecutionProvider;
   /** @deprecated hydrated from older workspaces */

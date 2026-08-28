@@ -624,7 +624,7 @@ function ExecutionTab() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        Test Cursor and Claude separately. Connectivity only checks the CLI. Unchecked, it sends your prompt on the cheapest model (Haiku / Composer) and shows the response.
+        Kindling does not embed Cursor or Claude. It shells out to their CLIs — the same <span className="font-mono">agent</span> / <span className="font-mono">claude</span> you run in Terminal. Print mode (<span className="font-mono">-p</span>) is one prompt in, text out, stored as the stage output. Long sessions open Terminal.app in the background so you can watch. No TTY means Cursor asks for workspace trust — we pass <span className="font-mono">--trust -f</span> so print mode is not interactive.
       </p>
       <MacAgentHints />
       {exec.demoFallbacks ? (
@@ -632,6 +632,31 @@ function ExecutionTab() {
           Demo text is on. If the agent is missing, Run still produces canned output. Turn this off once Cursor, Claude, or Studio is hooked up.
         </p>
       ) : null}
+
+      <section className="flex flex-col gap-3 rounded-md border border-border p-3">
+        <h3 className="text-sm font-medium">How a call works</h3>
+        <ol className="list-decimal space-y-1 pl-4 text-2xs text-muted">
+          <li>The stage prompt is interpolated from Settings + ticket vars (<span className="font-mono">{"{{brief}}"}</span>, <span className="font-mono">{"{{spec}}"}</span>…).</li>
+          <li>Kindling spawns the CLI in your workspace (or opens Terminal.app) with print-mode flags.</li>
+          <li>Stdout is the stage result. That becomes the next stage’s variable. Studio/CIS are HTTP instead of a CLI.</li>
+        </ol>
+        <label className="flex min-h-11 items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={exec.runInTerminal !== false}
+            onChange={(e) => patch({ runInTerminal: e.target.checked })}
+          />
+          Open Terminal.app in the background (Mac) so you can watch the session
+        </label>
+        <Field label="Workspace directory (trust root)">
+          <Input
+            className="font-mono"
+            value={exec.workspaceDir ?? ""}
+            placeholder="empty = the folder you launched npm run dev from"
+            onChange={(e) => patch({ workspaceDir: e.target.value })}
+          />
+        </Field>
+      </section>
 
       <section className="flex flex-col gap-3 rounded-md border border-border p-3">
         <h3 className="text-sm font-medium">Agent test</h3>
@@ -762,6 +787,13 @@ function ExecutionTab() {
         <Field label="Local command">
           <Input className="font-mono" value={exec.cursorCommand} onChange={(e) => patch({ cursorCommand: e.target.value })} />
         </Field>
+        <Field label="Print-mode flags (non-interactive)">
+          <Input
+            className="font-mono"
+            value={exec.cursorExtraArgs ?? "--trust -f"}
+            onChange={(e) => patch({ cursorExtraArgs: e.target.value })}
+          />
+        </Field>
         <Field label="Test model (cheapest ping)">
           <Input
             className="font-mono"
@@ -787,6 +819,13 @@ function ExecutionTab() {
         />
         <Field label="Local command">
           <Input className="font-mono" value={exec.claudeCommand} onChange={(e) => patch({ claudeCommand: e.target.value })} />
+        </Field>
+        <Field label="Print-mode flags (non-interactive)">
+          <Input
+            className="font-mono"
+            value={exec.claudeExtraArgs ?? "--permission-mode dontAsk"}
+            onChange={(e) => patch({ claudeExtraArgs: e.target.value })}
+          />
         </Field>
         <Field label="Test model (cheapest ping)">
           <Input

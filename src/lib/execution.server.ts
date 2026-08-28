@@ -1,6 +1,12 @@
 import { createDefaultExecution } from "./team-config";
 import { legacyDefaultAgent, resolveStep } from "./agents";
 import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing";
+import {
+  explainCliFailure,
+  runAgentProcess,
+  runProcess,
+  withNonInteractiveFlags,
+} from "./cli-session";
 import type { AgentKind, ExecutionConfig, StepAgent, TokenUsage } from "./types";
 
 export type ModelCall = {
@@ -68,6 +74,10 @@ export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
     }),
     provider: defaultAgent === "studio" || defaultAgent === "cis" ? defaultAgent : "local",
     localAgent: defaultAgent === "claude" ? "claude" : "cursor",
+    workspaceDir: envStr("PIT_WORKSPACE") || base.workspaceDir || "",
+    cursorExtraArgs: envStr("PIT_CURSOR_EXTRA_ARGS") || base.cursorExtraArgs || "--trust -f",
+    claudeExtraArgs: envStr("PIT_CLAUDE_EXTRA_ARGS") || base.claudeExtraArgs || "--permission-mode dontAsk",
+    runInTerminal: envStr("PIT_RUN_IN_TERMINAL") === "0" ? false : envStr("PIT_RUN_IN_TERMINAL") === "1" ? true : base.runInTerminal !== false,
   };
 }
 
@@ -195,82 +205,61 @@ export function parseCommand(line: string): { bin: string; args: string[] } {
   return { bin: parts[0] || "agent", args: parts.slice(1) };
 }
 
-async function runCli(bin: string, args: string[], timeoutMs: number): Promise<string> {
-  const { spawn } = await import("node:child_process");
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (err: Error | null, text?: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (err) reject(err);
-      else resolve(text ?? "");
-    };
-    let child: import("node:child_process").ChildProcess;
-    try {
-      child = spawn(bin, args, {
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (err) {
-      reject(err instanceof Error ? err : new Error(String(err)));
-      return;
-    }
-    let out = "";
-    let err = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(new Error(`${bin} timed out after ${Math.round(timeoutMs / 1000)}s`));
-    }, timeoutMs);
-    child.stdout?.on("data", (d: Buffer) => {
-      out += d.toString();
-    });
-    child.stderr?.on("data", (d: Buffer) => {
-      err += d.toString();
-    });
-    child.on("error", (e) => {
-      finish(e);
-    });
-    child.on("close", (code) => {
-      const text = out.trim();
-      if (code === 0 && text) {
-        finish(null, text);
-        return;
-      }
-      const detail = (err.trim() || text || `${bin} exited ${code}`).slice(0, 800);
-      finish(new Error(detail));
-    });
-  });
+function workspaceOf(exec: ExecutionConfig): string {
+  const dir = exec.workspaceDir?.trim();
+  return dir || process.cwd();
 }
 
-async function callLocalCli(exec: ExecutionConfig, prompt: string, kind: "cursor" | "claude"): Promise<ModelCall> {
+async function invokeCli(
+  exec: ExecutionConfig,
+  kind: "cursor" | "claude",
+  prompt: string,
+  extraArgs: string[] = [],
+  timeoutMs?: number,
+): Promise<{ ok: boolean; text: string; error?: string; via: string }> {
   const line = kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
   const { bin, args } = parseCommand(line);
   const via = kind === "claude" ? "Claude" : "Cursor";
   const found = await lookupBin(bin);
   if (!found) {
-    return {
-      ok: false,
-      text: "",
-      via,
-      error: `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.`,
-    };
+    return { ok: false, text: "", via, error: `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.` };
   }
-  try {
-    const text = await runCli(found, [...args, prompt], exec.timeoutMs);
-    return { ok: true, text, via };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const missing = /ENOENT|not found/i.test(message);
-    return {
-      ok: false,
-      text: "",
-      via,
-      error: missing
-        ? `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.`
-        : `${via}: ${message}`,
-    };
+  const flags = withNonInteractiveFlags(
+    kind,
+    [...args, ...extraArgs],
+    kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
+  );
+  const raw = await runAgentProcess({
+    bin: found,
+    args: [...flags, prompt],
+    cwd: workspaceOf(exec),
+    timeoutMs: timeoutMs ?? exec.timeoutMs,
+    inTerminal: Boolean(exec.runInTerminal),
+  });
+  const body = (raw.out || raw.err).trim();
+  if (raw.code === 0 && raw.out.trim()) {
+    return { ok: true, text: raw.out, via: raw.via === "terminal" ? `${via} Terminal` : via };
   }
+  return {
+    ok: false,
+    text: body,
+    via: raw.via === "terminal" ? `${via} Terminal` : via,
+    error: explainCliFailure(body || `exit ${raw.code}`),
+  };
+}
+
+async function callLocalCli(exec: ExecutionConfig, prompt: string, kind: "cursor" | "claude"): Promise<ModelCall> {
+  const result = await invokeCli(exec, kind, prompt);
+  if (result.ok) return { ok: true, text: result.text, via: result.via };
+  const missing = /ENOENT|not found|not on PATH/i.test(result.error || "");
+  return {
+    ok: false,
+    text: "",
+    via: result.via,
+    error: missing
+      ? result.error
+      : result.error || `${result.via}: empty response`,
+  };
 }
 
 function chatCompletionsUrl(base: string): string {
@@ -520,40 +509,7 @@ async function runCliRaw(
   args: string[],
   timeoutMs: number,
 ): Promise<{ code: number | null; out: string; err: string }> {
-  const { spawn } = await import("node:child_process");
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (code: number | null, out: string, err: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ code, out: out.trim(), err: err.trim() });
-    };
-    let child: import("node:child_process").ChildProcess;
-    try {
-      child = spawn(bin, args, {
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (err) {
-      finish(1, "", err instanceof Error ? err.message : String(err));
-      return;
-    }
-    let out = "";
-    let err = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(1, out, err || `${bin} timed out after ${Math.round(timeoutMs / 1000)}s`);
-    }, timeoutMs);
-    child.stdout?.on("data", (d: Buffer) => {
-      out += d.toString();
-    });
-    child.stderr?.on("data", (d: Buffer) => {
-      err += d.toString();
-    });
-    child.on("error", (e) => finish(1, out, e.message));
-    child.on("close", (code) => finish(code, out, err));
-  });
+  return runProcess(bin, args, timeoutMs, process.cwd());
 }
 
 type LocatedCli = {
@@ -621,16 +577,21 @@ async function pingAgent(
     located.kind === "claude"
       ? exec.claudeTestModel?.trim() || "haiku"
       : exec.cursorTestModel?.trim() || "composer-1";
-  const args = withModelFlag(located.args, model);
-  const raw = await runCliRaw(located.found!.path, [...args, prompt], Math.min(Math.max(exec.timeoutMs, 15000), 60000));
-  const body = (raw.out || raw.err).slice(0, 800);
-  const ok = raw.code === 0 && Boolean(raw.out.trim());
+  const extra = model ? ["--model", model] : [];
+  const result = await invokeCli(
+    exec,
+    located.kind,
+    prompt,
+    extra,
+    Math.min(Math.max(exec.timeoutMs, 20000), 120000),
+  );
+  const body = (result.text || result.error || "").slice(0, 800);
   return {
-    ok,
-    label: `${via} test run (${model})`,
-    detail: ok
+    ok: result.ok,
+    label: `${via} test run (${model}${exec.runInTerminal ? " · Terminal" : ""})`,
+    detail: result.ok
       ? `request: ${prompt}\nresponse: ${body}`
-      : `request: ${prompt}\n${body || `exit ${raw.code}`}`,
+      : `request: ${prompt}\n${body}`,
   };
 }
 

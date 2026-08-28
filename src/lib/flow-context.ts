@@ -81,9 +81,26 @@ export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, s
     "";
   ctx.jira =
     ctx.jira ||
+    (ticket.linkedJira
+      ? `${ticket.linkedJira.key} ${ticket.linkedJira.title}\n${ticket.linkedJira.description}`
+      : "") ||
     ticket.jiraCreated.map((j) => `${j.key} ${j.title}`).join("\n") ||
     ticket.outputs["file-jira"] ||
     "";
+  if (ticket.linkedJira) {
+    ctx["jira.key"] = ticket.linkedJira.key;
+    ctx["jira.title"] = ticket.linkedJira.title;
+    ctx["jira.status"] = ticket.linkedJira.status;
+    ctx["jira.url"] = ticket.linkedJira.url;
+    ctx["jira.description"] = ticket.linkedJira.description;
+  }
+  if (ticket.linkedRepo) {
+    ctx.repo = ticket.linkedRepo.fullName;
+    ctx["repo.fullName"] = ticket.linkedRepo.fullName;
+    ctx["repo.url"] = ticket.linkedRepo.url;
+    ctx["repo.branch"] = ticket.linkedRepo.defaultBranch;
+    ctx["repo.description"] = ticket.linkedRepo.description;
+  }
   ctx.prev = ctx.prev || "";
 
   if (docs?.length) {

@@ -13,6 +13,8 @@ import { formatGrillRecord } from "@/lib/grill";
 import { GrillRoom } from "@/components/studio/GrillRoom";
 import { RunLog } from "@/components/studio/RunLog";
 import type { Ticket } from "@/lib/types";
+import { createDefaultConnectors } from "@/lib/connectors";
+import { pullJiraIssue } from "@/lib/connectors-api";
 
 export function WorkPanel() {
   const selectedId = useBoardStore((s) => s.selectedId);
@@ -55,6 +57,7 @@ export function WorkPanel() {
             {ticket.blockedReason}
           </pre>
         ) : null}
+        <ContextAttach ticket={ticket} />
         <FlowVars ticket={ticket} />
         <StepBody ticket={ticket} />
         <section className="mt-6">
@@ -63,6 +66,90 @@ export function WorkPanel() {
         </section>
       </div>
     </aside>
+  );
+}
+
+function ContextAttach({ ticket }: { ticket: Ticket }) {
+  const connectors = useBoardStore((s) => s.config.connectors) ?? createDefaultConnectors();
+  const attachJira = useBoardStore((s) => s.attachJira);
+  const attachRepo = useBoardStore((s) => s.attachRepo);
+  const setCatalog = useBoardStore((s) => s.setCatalog);
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function pull() {
+    if (!key.trim()) return;
+    setBusy(true);
+    const r = await pullJiraIssue({ data: { jira: connectors.jira, key } });
+    setBusy(false);
+    if (r.ok && r.issue) {
+      attachJira(ticket.id, r.issue);
+      setCatalog({ issues: [r.issue, ...connectors.issues.filter((i) => i.key !== r.issue!.key)] });
+      setKey("");
+    }
+  }
+
+  return (
+    <section className="mb-4 rounded-md border border-border px-3 py-2">
+      <p className="text-micro uppercase tracking-widest text-subtle">Jira & repo</p>
+      <p className="mt-1 text-2xs text-muted">
+        {ticket.linkedJira ? (
+          <>
+            Jira <span className="font-mono text-fg">{ticket.linkedJira.key}</span> flows as {"{{jira.key}}"} / {"{{jira.description}}"}
+          </>
+        ) : (
+          "No Jira attached — pull a key or pick from sync."
+        )}
+        {ticket.linkedRepo ? (
+          <>
+            {" · "}
+            Repo <span className="font-mono text-fg">{ticket.linkedRepo.fullName}</span> as {"{{repo}}"}
+          </>
+        ) : null}
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {connectors.issues.length ? (
+          <select
+            className="h-11 min-w-40 flex-1 rounded-md border border-border bg-inset px-2 text-sm"
+            value={ticket.linkedJira?.key ?? ""}
+            onChange={(e) => {
+              const hit = connectors.issues.find((i) => i.key === e.target.value);
+              if (hit) attachJira(ticket.id, hit);
+            }}
+          >
+            <option value="">Jira issue…</option>
+            {connectors.issues.map((i) => (
+              <option key={i.key} value={i.key}>
+                {i.key} {i.title}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        <div className="flex min-w-40 flex-1 gap-1">
+          <Input className="font-mono" placeholder="X2-698" value={key} onChange={(e) => setKey(e.target.value)} />
+          <Button type="button" size="md" disabled={busy || !key.trim()} onClick={() => void pull()}>
+            {busy ? "…" : "Pull"}
+          </Button>
+        </div>
+        {connectors.repos.length ? (
+          <select
+            className="h-11 min-w-40 flex-1 rounded-md border border-border bg-inset px-2 text-sm"
+            value={ticket.linkedRepo?.fullName ?? ""}
+            onChange={(e) => {
+              const hit = connectors.repos.find((r) => r.fullName === e.target.value);
+              if (hit) attachRepo(ticket.id, hit);
+            }}
+          >
+            <option value="">Repo…</option>
+            {connectors.repos.map((r) => (
+              <option key={r.fullName} value={r.fullName}>
+                {r.fullName}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

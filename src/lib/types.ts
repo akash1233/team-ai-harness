@@ -1,3 +1,5 @@
+import type { ConnectorsConfig, LinkedJira, LinkedRepo } from "./connectors";
+
 export type TicketStatus = "idle" | "executing" | "blocked" | "done";
 
 export type ColumnRole =
@@ -211,6 +213,7 @@ export type TeamConfig = {
   showSpend: boolean;
   autoAdvance: boolean;
   execution: ExecutionConfig;
+  connectors: ConnectorsConfig;
 };
 
 export type Ticket = {
@@ -244,4 +247,6 @@ export type Ticket = {
   /** Live Terminal session for a long pipeline stage. */
   sessionDir?: string;
   liveLog?: string;
+  linkedJira?: LinkedJira;
+  linkedRepo?: LinkedRepo;
 };

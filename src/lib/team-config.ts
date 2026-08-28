@@ -14,6 +14,7 @@ import {
 } from "./columns";
 import { mergePricing } from "./pricing";
 import { createDefaultPrompts, mergePrompts, stampPromptRefs } from "./prompts";
+import { createDefaultConnectors, mergeConnectors } from "./connectors";
 import { legacyDefaultAgent } from "./agents";
 import { DEFAULT_DOCS } from "./grill-skill";
 import type { ExecutionConfig, Flow, TeamConfig, TeamDoc, TeamMember, WorkflowColumn } from "./types";
@@ -121,6 +122,7 @@ export function createDefaultTeam(): TeamConfig {
     showSpend: true,
     autoAdvance: active.autoAdvance,
     execution: createDefaultExecution(),
+    connectors: createDefaultConnectors(),
   };
 }
 
@@ -239,6 +241,7 @@ export function mergeTeamConfig(saved?: Partial<TeamConfig>): TeamConfig {
     docs: mergeDocs(saved.docs),
     prompts: mergePrompts(saved.prompts, saved.columns ?? d.columns),
     execution: mergeExecution(saved.execution),
+    connectors: mergeConnectors(saved.connectors),
     flows,
     activeFlowId,
     columns: flows.find((f) => f.id === activeFlowId)?.columns ?? d.columns,

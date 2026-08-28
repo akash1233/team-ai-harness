@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import type { Flow, GrillQuestion, GrillRound, TeamConfig, TeamDoc, TeamMember, TeamPrompt, Ticket, WorkflowColumn } from "./types";
+import type { LinkedJira, LinkedRepo } from "./connectors";
+import { connectorVars, mergeConnectors } from "./connectors";
 import {
   BLOCKED_COLUMN_ID,
   cloneColumns,
@@ -43,7 +45,13 @@ type BoardState = {
   toggleSettings: (open?: boolean) => void;
   moveTicket: (id: string, columnId: string) => void;
   updateTicket: (id: string, patch: Partial<Ticket>) => void;
-  addTicket: (input: { title: string; description: string; key?: string }) => string;
+  addTicket: (input: {
+    title: string;
+    description: string;
+    key?: string;
+    linkedJira?: LinkedJira;
+    linkedRepo?: LinkedRepo;
+  }) => string;
   reset: () => void;
   resetTeam: () => void;
   openPrompt: (columnId: string | null) => void;
@@ -80,6 +88,9 @@ type BoardState = {
   duplicateFlow: (id?: string) => void;
   removeFlow: (id: string) => void;
   patchFlow: (patch: Partial<Flow>) => void;
+  attachJira: (id: string, issue: LinkedJira) => void;
+  attachRepo: (id: string, repo: LinkedRepo) => void;
+  setCatalog: (patch: { issues?: LinkedJira[]; repos?: LinkedRepo[] }) => void;
 };
 
 function persistNow(
@@ -195,18 +206,19 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     get().persist();
   },
 
-  addTicket: ({ title, description, key }) => {
+  addTicket: ({ title, description, key, linkedJira, linkedRepo }) => {
     const id = uid("ticket");
     const runId = uid();
     const { tickets, config } = get();
     const keys = tickets.map((t) => t.key);
     const start =
       config.columns.find((c) => c.enabled && c.role === "collect-input")?.id ?? IDEATION_COLUMN_ID;
+    const extra = connectorVars(linkedJira, linkedRepo);
     const ticket: Ticket = {
       id,
-      key: key?.trim() || nextKey(keys, config.jiraPrefix),
+      key: linkedJira?.key || key?.trim() || nextKey(keys, config.jiraPrefix),
       title: title.trim(),
-      description: description.trim(),
+      description: description.trim() || linkedJira?.description || "",
       labels: config.labels[0] ? [config.labels[0]] : ["discovery"],
       columnId: start,
       flowId: config.activeFlowId,
@@ -219,13 +231,15 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       ideationNotes: "",
       transcript: "",
       outputs: {},
-      vars: {},
+      vars: extra,
       agentResponses: [],
       grillRounds: [],
       fryComplete: false,
       plan: null,
       jiraCreated: [],
       createdAt: new Date().toISOString(),
+      linkedJira,
+      linkedRepo,
     };
     set({
       tickets: [ticket, ...tickets],
@@ -1018,6 +1032,46 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   patchFlow: (patch) => {
     set({ config: patchActiveFlow(get().config, patch) });
+    get().persist();
+  },
+
+  attachJira: (id, issue) => {
+    set({
+      tickets: withTicket(get().tickets, id, (t) => ({
+        ...t,
+        key: issue.key || t.key,
+        title: t.title || issue.title,
+        description: t.description || issue.description,
+        linkedJira: issue,
+        vars: { ...t.vars, ...connectorVars(issue, t.linkedRepo) },
+      })),
+    });
+    get().persist();
+  },
+
+  attachRepo: (id, repo) => {
+    set({
+      tickets: withTicket(get().tickets, id, (t) => ({
+        ...t,
+        linkedRepo: repo,
+        vars: { ...t.vars, ...connectorVars(t.linkedJira, repo) },
+      })),
+    });
+    get().persist();
+  },
+
+  setCatalog: (patch) => {
+    const connectors = get().config.connectors ?? mergeConnectors();
+    set({
+      config: {
+        ...get().config,
+        connectors: {
+          ...connectors,
+          issues: patch.issues ?? connectors.issues,
+          repos: patch.repos ?? connectors.repos,
+        },
+      },
+    });
     get().persist();
   },
 }));

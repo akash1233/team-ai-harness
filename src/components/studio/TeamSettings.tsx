@@ -11,8 +11,9 @@ import { testExecution } from "@/lib/discovery-agent";
 import { Field, Code } from "@/components/studio/settings/field";
 import { PricingFields } from "@/components/studio/settings/PricingFields";
 import { mergePricing } from "@/lib/pricing";
+import { ConnectTab } from "@/components/studio/ConnectTab";
 
-const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Skills", "Execution", "Look"] as const;
+const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Skills", "Connect", "Execution", "Look"] as const;
 type Tab = (typeof TABS)[number];
 
 const ROLE_LABEL: Record<ColumnRole, string> = {
@@ -87,6 +88,7 @@ export function TeamSettings() {
           {tab === "Pipeline" ? <PipelineTab onEditPrompt={openPrompt} /> : null}
           {tab === "Prompts" ? <PromptsTab focusId={focusPromptId} onFocus={setFocusPromptId} /> : null}
           {tab === "Skills" ? <DocsTab /> : null}
+          {tab === "Connect" ? <ConnectTab /> : null}
           {tab === "Execution" ? <ExecutionTab /> : null}
           {tab === "Look" ? <LookTab /> : null}
         </div>

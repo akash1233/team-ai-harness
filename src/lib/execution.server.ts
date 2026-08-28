@@ -10,7 +10,10 @@ import {
   runAgentProcess,
   runProcess,
   sessionShouldStop,
+  startInteractiveSession,
   startMacSession,
+  tryCursorChatId,
+  toInteractiveArgs,
   withCursorWorkspace,
   withNonInteractiveFlags,
   withoutFullAgentMode,
@@ -24,6 +27,8 @@ export type ModelCall = {
   error?: string;
   usage?: TokenUsage;
   spend?: number;
+  sessionDir?: string;
+  pending?: boolean;
 };
 
 function envStr(key: string): string | undefined {
@@ -225,7 +230,8 @@ async function invokeCli(
   prompt: string,
   extraArgs: string[] = [],
   timeoutMs?: number,
-): Promise<{ ok: boolean; text: string; error?: string; via: string }> {
+  printMode = false,
+): Promise<{ ok: boolean; text: string; error?: string; via: string; sessionDir?: string; pending?: boolean }> {
   const line = kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
   const { bin, args } = parseCommand(line);
   const via = kind === "claude" ? "Claude" : "Cursor";
@@ -233,24 +239,42 @@ async function invokeCli(
   if (!found) {
     return { ok: false, text: "", via, error: `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.` };
   }
-  const flags = (() => {
-    let base = withNonInteractiveFlags(
-      kind,
-      [...args, ...extraArgs],
-      kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
-    );
-    if (!exec.fullAgentMode) base = ensurePrintMode(withoutFullAgentMode(base));
-    if (kind === "cursor") base = withCursorWorkspace(base, workspaceOf(exec));
-    if (kind === "claude" && !base.includes("--session-id")) {
-      base = ["--session-id", crypto.randomUUID(), ...base];
+  const cwd = workspaceOf(exec);
+  let flags = withNonInteractiveFlags(
+    kind,
+    [...args, ...extraArgs],
+    kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
+  );
+  if (!exec.fullAgentMode) flags = withoutFullAgentMode(flags);
+  if (kind === "cursor") flags = withCursorWorkspace(flags, cwd);
+  const longStage = Boolean(exec.runInTerminal) && !printMode && process.platform === "darwin";
+  if (longStage) {
+    flags = toInteractiveArgs(flags);
+    if (kind === "claude" && !flags.includes("--session-id")) {
+      flags = ["--session-id", crypto.randomUUID(), ...flags];
     }
-    return base;
-  })();
+    if (kind === "cursor" && !flags.includes("--resume")) {
+      const chat = await tryCursorChatId(found, cwd);
+      if (chat) flags = ["--resume", chat, ...flags];
+    }
+    const session = await startInteractiveSession(cwd, found, flags, prompt);
+    return {
+      ok: true,
+      text: "Long stage opened in Terminal. Answer any prompts there. Close the window when the agent is done — Kindling is tailing the log.",
+      via: `${via} Terminal`,
+      sessionDir: session.dir,
+      pending: true,
+    };
+  }
+  flags = exec.fullAgentMode ? flags : ensurePrintMode(flags);
+  if (kind === "claude" && !flags.includes("--session-id")) {
+    flags = ["--session-id", crypto.randomUUID(), ...flags];
+  }
   const raw = await runAgentProcess({
     bin: found,
     args: flags,
     prompt,
-    cwd: workspaceOf(exec),
+    cwd,
     timeoutMs: timeoutMs ?? exec.timeoutMs,
     inTerminal: Boolean(exec.runInTerminal),
     fullAgent: Boolean(exec.fullAgentMode),
@@ -270,6 +294,9 @@ async function invokeCli(
 
 async function callLocalCli(exec: ExecutionConfig, prompt: string, kind: "cursor" | "claude"): Promise<ModelCall> {
   const result = await invokeCli(exec, kind, prompt);
+  if (result.pending && result.sessionDir) {
+    return { ok: true, text: result.text, via: result.via, sessionDir: result.sessionDir, pending: true };
+  }
   if (result.ok) return { ok: true, text: result.text, via: result.via };
   const missing = /ENOENT|not found|not on PATH/i.test(result.error || "");
   return {
@@ -596,6 +623,7 @@ async function pingAgent(
     prompt,
     extra,
     Math.min(Math.max(exec.timeoutMs, 20000), 120000),
+    true,
   );
   const body = (result.text || result.error || "").slice(0, 800);
   return {
@@ -976,7 +1004,10 @@ export async function startAgentTest(opts: {
   };
 }
 
-export async function pollAgentTest(sessionDir: string): Promise<{
+export async function pollAgentTest(
+  sessionDir: string,
+  opts?: { longSession?: boolean },
+): Promise<{
   done: boolean;
   ok: boolean;
   log: string;
@@ -995,6 +1026,9 @@ export async function pollAgentTest(sessionDir: string): Promise<{
       log: snap.log,
       error: ok ? undefined : explainCliFailure(snap.log) || `exit ${snap.exitCode}`,
     };
+  }
+  if (opts?.longSession) {
+    return { done: false, ok: true, log: snap.log };
   }
   if (age > 12000 && isNoiseLog(snap.log)) {
     return {

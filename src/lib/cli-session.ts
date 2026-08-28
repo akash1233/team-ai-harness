@@ -303,3 +303,55 @@ export async function runAgentProcess(opts: {
   const r = await runProcess(opts.bin, argv, opts.timeoutMs, opts.cwd);
   return { ...r, out: stripAnsi(r.out), err: stripAnsi(r.err), via: "spawn" };
 }
+
+/**
+ * Long pipeline stage: `script -q -F` gives Claude/Cursor a TTY so the TUI
+ * renders and the operator can answer prompts. Kindling tails the capture file.
+ */
+export async function startInteractiveSession(
+  cwd: string,
+  bin: string,
+  args: string[],
+  prompt: string,
+): Promise<{ dir: string; outFile: string; codeFile: string }> {
+  const fs = await import("node:fs/promises");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "kindling-stage-"));
+  const outFile = path.join(dir, "out.txt");
+  const codeFile = path.join(dir, "code.txt");
+  const promptFile = path.join(dir, "prompt.md");
+  const script = path.join(dir, "run.command");
+  await fs.writeFile(path.join(dir, "started.txt"), String(Date.now()));
+  await fs.writeFile(promptFile, prompt);
+  await fs.writeFile(
+    outFile,
+    `[kindling] ${new Date().toISOString()} long stage\n[kindling] ${bin} ${args.join(" ")} $(cat prompt.md)\n`,
+  );
+  const inner = `cd ${shellQuote(cwd)} && ${shellQuote(bin)} ${args.map(shellQuote).join(" ")} "$(cat ${shellQuote(promptFile)})"`;
+  const body = `#!/bin/bash
+unset npm_config_prefix
+unset NPM_CONFIG_PREFIX
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+cd ${shellQuote(cwd)}
+echo "[kindling] $(date -u +%H:%M:%S) interactive stage — answer prompts here. Close when done." | tee -a ${shellQuote(outFile)}
+script -q -F ${shellQuote(outFile)} /bin/bash -c ${shellQuote(inner)}
+echo $? > ${shellQuote(codeFile)}
+echo "[kindling] $(date -u +%H:%M:%S) exit $(cat ${shellQuote(codeFile)})" | tee -a ${shellQuote(outFile)}
+`;
+  await fs.writeFile(script, body, { mode: 0o755 });
+  const opened = await runProcess("open", ["-g", "-a", "Terminal", script], 8000);
+  if (opened.code !== 0 && opened.err) {
+    await fs.writeFile(codeFile, "1");
+    await fs.appendFile(outFile, `\n[kindling] failed to open Terminal: ${opened.err}\n`);
+  }
+  return { dir, outFile, codeFile };
+}
+
+export async function tryCursorChatId(bin: string, cwd: string): Promise<string | undefined> {
+  const raw = await runProcess(bin, ["create-chat"], 12000, cwd);
+  const text = `${raw.out}\n${raw.err}`;
+  const hit = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return hit?.[0];
+}
+

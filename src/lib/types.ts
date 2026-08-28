@@ -241,4 +241,7 @@ export type Ticket = {
   plan: Plan | null;
   jiraCreated: JiraIssue[];
   createdAt: string;
+  /** Live Terminal session for a long pipeline stage. */
+  sessionDir?: string;
+  liveLog?: string;
 };

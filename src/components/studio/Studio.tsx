@@ -11,6 +11,7 @@ import { StageRail } from "./StageRail";
 import { TicketList } from "./TicketList";
 import { PipelineBoard } from "./PipelineBoard";
 import { TeamSettings } from "./TeamSettings";
+import { StageSessionWatcher } from "./StageSessionWatcher";
 
 export function Studio() {
   const hydrate = useBoardStore((s) => s.hydrate);
@@ -124,6 +125,7 @@ export function Studio() {
 
       <NewTicketDialog open={newOpen} onOpenChange={setNewOpen} />
       {settingsOpen ? <TeamSettings /> : null}
+      <StageSessionWatcher />
     </div>
   );
 }

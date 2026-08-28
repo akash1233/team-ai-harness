@@ -309,6 +309,7 @@ function ReviewForm({ ticket }: { ticket: Ticket }) {
 
 function RunForm({ ticket }: { ticket: Ticket }) {
   const runTicket = useBoardStore((s) => s.runTicket);
+  const harvestLiveSession = useBoardStore((s) => s.harvestLiveSession);
   const advance = useBoardStore((s) => s.advance);
   const config = useBoardStore((s) => s.config);
   const col = columnById(ticket.columnId, config.columns);
@@ -318,7 +319,22 @@ function RunForm({ ticket }: { ticket: Ticket }) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">{resolved.body.slice(0, 280) || col?.promptTemplate}</p>
-      {hasOutput ? (
+      {ticket.sessionDir ? (
+        <>
+          <p className="text-2xs text-muted">Long stage in Terminal — answer prompts there. Close the window when done, or harvest the log now.</p>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-mono text-2xs">
+            {ticket.liveLog || "Waiting for Terminal…"}
+          </pre>
+          <Button
+            variant="secondary"
+            size="md"
+            className="w-full"
+            onClick={() => void harvestLiveSession(ticket.id, { ok: true, log: ticket.liveLog || "" })}
+          >
+            Harvest log & continue
+          </Button>
+        </>
+      ) : hasOutput ? (
         <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
           {ticket.outputs[ticket.columnId]}
         </pre>

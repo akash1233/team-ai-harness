@@ -28,6 +28,7 @@ export type AgentResult =
       grill?: { frontierEmpty: boolean; questions: GrillQuestion[] };
       via?: string;
       usage?: { inputTokens: number; outputTokens: number; estimated: boolean };
+      sessionDir?: string;
     }
   | { ok: false; error: string; via?: string };
 
@@ -42,7 +43,7 @@ type AgentInput = {
   docs?: TeamDoc[];
 };
 
-function extractPlan(text: string): Plan | undefined {
+export function extractPlan(text: string): Plan | undefined {
   const start = text.indexOf(PLAN_JSON_START);
   const end = text.indexOf(PLAN_JSON_END);
   if (start < 0 || end < 0 || end <= start) return undefined;
@@ -56,7 +57,7 @@ function extractPlan(text: string): Plan | undefined {
   }
 }
 
-function extractGrill(text: string): { frontierEmpty: boolean; questions: GrillQuestion[] } | undefined {
+export function extractGrill(text: string): { frontierEmpty: boolean; questions: GrillQuestion[] } | undefined {
   const fence = text.match(/```json\s*([\s\S]*?)```/);
   const raw = fence?.[1]?.trim() ?? (text.trim().startsWith("{") ? text.trim() : "");
   if (!raw) return undefined;
@@ -238,6 +239,17 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
       promptId,
       stepAgent,
     });
+    if (live.sessionDir) {
+      return {
+        ok: true,
+        text: live.text,
+        summary: "Session open in Terminal",
+        spend: 0,
+        runId,
+        via: live.via,
+        sessionDir: live.sessionDir,
+      };
+    }
     const fb = fallbackFor(ticket, columnId, grillSubmit);
     const useDemo = !live.ok && (execution?.demoFallbacks ?? true);
     if (!live.ok && !useDemo) {
@@ -285,6 +297,7 @@ export const testExecution = createServerFn({ method: "POST" })
       mcpServer?: string;
       phase?: "start" | "poll";
       sessionDir?: string;
+      longSession?: boolean;
     }) => input,
   )
   .handler(
@@ -303,7 +316,7 @@ export const testExecution = createServerFn({ method: "POST" })
       try {
         const exec = await import("./execution.server");
         if (data.phase === "poll" && data.sessionDir) {
-          const poll = await exec.pollAgentTest(data.sessionDir);
+          const poll = await exec.pollAgentTest(data.sessionDir, { longSession: data.longSession });
           return {
             ok: poll.ok,
             via: "session",

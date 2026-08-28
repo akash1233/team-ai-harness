@@ -805,7 +805,7 @@ function ExecutionTab() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        Kindling opens Terminal and <span className="font-mono">tee</span>s print mode (<span className="font-mono">-p</span>) into the app log. Workday Claude blocks auto mode outside a dev container, so we never pass <span className="font-mono">--permission-mode dontAsk</span>. If Terminal asks “do you trust this folder?”, answer yes once.
+        Kindling tests use print mode (<span className="font-mono">-p</span>) so they exit. Pipeline stages open a long Terminal TUI (<span className="font-mono">script -q -F</span>, prompt file, session id / workspace). Answer prompts there; close the window when done.
       </p>
       <MacAgentHints />
       {exec.demoFallbacks ? (

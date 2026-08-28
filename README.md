@@ -75,7 +75,7 @@ agent --version
 
 If only `cursor-agent` exists, set Cursor command to `cursor-agent -p --output-format text`.
 
-Kindling opens **Terminal.app as a live session** (`script` records a TTY). You talk to Cursor/Claude there — they can ask questions. Kindling tails the log into the ticket. Close the window when finished. Print mode (`-p`) is only used when Terminal is off.
+**Tests** use print mode (`-p`) so they exit. **Pipeline stages** open a long Terminal TUI (`script -q -F`, prompt via `$(cat prompt.md)`, Claude `--session-id`, Cursor `--workspace` / `--resume`). Close the window when the agent is done; Kindling tails the log and continues the flow. Harvest & continue is on the ticket if you want to take the log without waiting.
 
 **Claude Code**
 

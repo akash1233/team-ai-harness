@@ -9,6 +9,7 @@ import {
   IDEATION_COLUMN_ID,
   nextColumnId,
   TRANSCRIPT_COLUMN_ID,
+  WRITE_PLAN_COLUMN_ID,
   columnById,
 } from "./columns";
 import { createSampleTickets, STORAGE_KEY } from "./sample-data";
@@ -24,7 +25,7 @@ import { harvestVars } from "./flow-context";
 import { promptIdForColumn, resolveStagePrompt, stampPromptRefs } from "./prompts";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
-import { runDiscoveryAgent } from "./discovery-agent";
+import { extractGrill, extractPlan, runDiscoveryAgent } from "./discovery-agent";
 
 type BoardState = {
   tickets: Ticket[];
@@ -52,6 +53,8 @@ type BoardState = {
   failTicket: (id: string, reason: string, columnId?: string, via?: string) => void;
   runColumn: (columnId: string) => Promise<void>;
   runTicket: (id: string) => Promise<void>;
+  patchLiveLog: (id: string, log: string) => void;
+  harvestLiveSession: (id: string, result: { ok: boolean; log: string; error?: string }) => Promise<void>;
   submitGrill: (id: string, answers: Record<number, string>) => Promise<void>;
   patchGrillQuestion: (ticketId: string, roundId: string, n: number, patch: Partial<GrillQuestion>) => void;
   setActiveMember: (id: string) => void;
@@ -314,6 +317,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           },
           ...t.agentResponses,
         ],
+        sessionDir: undefined,
       })),
     });
     get().persist();
@@ -405,6 +409,17 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         get().failTicket(id, result.error, latest.columnId, result.via);
         return;
       }
+      if (result.sessionDir) {
+        set({
+          tickets: withTicket(get().tickets, id, {
+            status: "executing",
+            sessionDir: result.sessionDir,
+            liveLog: result.text,
+          }),
+        });
+        get().persist();
+        return;
+      }
       if (result.blocked) {
         get().failTicket(id, result.blocked, latest.columnId, result.via);
         return;
@@ -479,6 +494,82 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const message = err instanceof Error ? err.message : "Agent failed";
       get().failTicket(id, message, get().tickets.find((t) => t.id === id)?.columnId ?? "");
     }
+  },
+
+  patchLiveLog: (id, log) => {
+    const t = get().tickets.find((x) => x.id === id);
+    if (!t || t.liveLog === log) return;
+    set({ tickets: withTicket(get().tickets, id, { liveLog: log }) });
+  },
+
+  harvestLiveSession: async (id, result) => {
+    const ticket = get().tickets.find((t) => t.id === id);
+    if (!ticket) return;
+    if (!result.ok) {
+      get().failTicket(id, result.error || "Stage session failed", ticket.columnId, "Terminal");
+      set({ tickets: withTicket(get().tickets, id, { sessionDir: undefined }) });
+      get().persist();
+      return;
+    }
+    const liveCol = columnById(ticket.columnId, get().config.columns);
+    const text = result.log.trim();
+    const grill = ticket.columnId === FRY_COLUMN_ID ? extractGrill(text) : undefined;
+    const plan = ticket.columnId === WRITE_PLAN_COLUMN_ID ? extractPlan(text) : undefined;
+    const body = ticket.columnId === FRY_COLUMN_ID && grill && !grill.frontierEmpty ? "" : text;
+    const nextVars = {
+      ...(body ? harvestVars({ ...ticket, vars: ticket.vars ?? {} }, liveCol, body) : ticket.vars ?? {}),
+    };
+    if (plan) nextVars.plan = JSON.stringify(plan, null, 2);
+    if (grill?.frontierEmpty && text) nextVars.grill = text;
+    set({
+      tickets: withTicket(get().tickets, id, (t) => ({
+        ...t,
+        status: "idle",
+        sessionDir: undefined,
+        liveLog: text,
+        outputs:
+          t.columnId === FRY_COLUMN_ID && grill && !grill.frontierEmpty
+            ? t.outputs
+            : { ...t.outputs, [t.columnId]: text },
+        vars: nextVars,
+        agentResponses: [
+          {
+            id: uid("resp"),
+            at: new Date().toISOString(),
+            columnId: t.columnId,
+            summary: "Long stage · Terminal",
+            body: text,
+            via: "Terminal",
+            ok: true,
+          },
+          ...t.agentResponses,
+        ],
+        grillRounds:
+          grill && grill.questions.length
+            ? [
+                ...t.grillRounds,
+                {
+                  id: uid("round"),
+                  submitted: false,
+                  questions: assignQuestions(
+                    grill.questions.map((q) => ({
+                      n: q.n,
+                      question: q.question,
+                      recommended: q.recommended,
+                      answer: "",
+                      source: q.source,
+                    })),
+                    get().config.members,
+                  ),
+                },
+              ]
+            : t.grillRounds,
+        fryComplete: grill?.frontierEmpty ? true : t.fryComplete,
+        plan: plan ?? t.plan,
+      })),
+    });
+    get().persist();
+    await get().continueAfter(id);
   },
 
   submitGrill: async (id, answers) => {

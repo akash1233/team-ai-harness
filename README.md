@@ -1,39 +1,68 @@
-# Pit Discovery
+# Team AI Harness
 
 Team workspace for the Discovery pipeline. One stage at a time: brief → agenda → notes → spec → **Grill Me** → backlog → Jira.
 
-Each stage picks its own agent — **Cursor**, **Claude**, **GenAI Studio**, or **CIS** — running as a local CLI or a remote HTTP endpoint. Grill Me interviews the spec from Synthesize. The crew answers every question (typed or spoken). Those answers are what Write plan consumes.
+Each stage picks its own agent — **Cursor**, **Claude**, **GenAI Studio**, or **CIS** — running as a local CLI (Mac) or a remote HTTP endpoint. Grill Me interviews the spec from Synthesize. The crew answers every question (typed or spoken). Those answers are what Write plan consumes.
 
-## Quick start
+Repo: [github.com/akash1233/team-ai-harness](https://github.com/akash1233/team-ai-harness)
+
+## Quick start (Mac)
+
+Need Node 22+ and Homebrew if you do not already have them.
 
 ```bash
-git clone https://github.com/akash1233/pit-discovery.git
-cd pit-discovery
+# Node
+brew install node@22
+echo 'export PATH="/opt/homebrew/opt/node@22/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+git clone https://github.com/akash1233/team-ai-harness.git
+cd team-ai-harness
 cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-Open [http://localhost:8080](http://localhost:8080).
+Open [http://localhost:8080](http://localhost:8080). Use Chrome or Edge for Grill Me voice.
 
-Node 22+. Chrome or Edge if you want Grill Me voice (read-aloud + dictation).
+Then **Team → Execution** and follow the Mac agent steps on that page.
 
-## Hook up a real agent (local first)
+## Hook up Cursor / Claude on a Mac
 
-Until a CLI is on PATH, **Team → Execution → Test default agent** will say `agent` / `claude` is missing. Demo text is a fallback only.
+The harness spawns a CLI. Until `agent` or `claude` is on PATH, **Test default agent** will say the binary is missing.
 
-1. Install [Cursor CLI](https://cursor.com) so `agent` is on your PATH, and/or [Claude Code](https://docs.anthropic.com/en/docs/claude-code) so `claude` is on PATH.
-2. `cp .env.example .env.local` and keep `PIT_DEMO_FALLBACKS=0`.
-3. Restart `npm run dev`.
-4. **Team → Execution → Test default agent** should report the binary path.
-5. Uncheck **Use demo text if the agent is offline**.
+**Cursor Agent**
 
-Default CLI commands (editable in Execution):
+```bash
+curl https://cursor.com/install -fsS | bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+which agent || which cursor-agent
+agent --version
+```
 
-| Agent | Command |
-| --- | --- |
-| Cursor | `agent -p --output-format text` |
-| Claude | `claude -p --output-format text` |
+If only `cursor-agent` exists, in **Team → Execution** set Cursor command to:
+
+```
+cursor-agent -p --output-format text
+```
+
+**Claude Code**
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+# or: brew install --cask claude-code
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+which claude
+claude --version
+```
+
+Then:
+
+1. Quit and re-run `npm run dev` **from the same Terminal** (Finder-launched Node will not see your zsh PATH).
+2. **Team → Execution → Test default agent** should print a path under `~/.local/bin`.
+3. Uncheck **Use demo text if the agent is offline**.
 
 Optional: point **Local HTTP sidecar** at an OpenAI-compatible server (`http://127.0.0.1:11434/v1`) instead of spawning a CLI.
 
@@ -49,22 +78,16 @@ Shipped defaults:
 | Grill, Backlog | Claude |
 | Everything else | Inherit |
 
-**Team → Execution** is where that agent *lives*:
+**Team → Execution** is where that agent *lives*: Cursor/Claude local vs remote, or GenAI Studio / CIS (feature key = your user id, no API token).
 
-- Cursor local / remote URL
-- Claude local / remote URL
-- GenAI Studio: `POST /v1alpha/prediction/cis/generate/{promptId}` with `wd-pca-feature-key`
-- CIS: `POST /cis/v1alpha1/predictions` (no API token — feature key is your user id)
-
-Env vars in [`.env.example`](.env.example) override the UI on the server. Full matrix: [docs/SETUP.md](docs/SETUP.md).
+Env vars in [`.env.example`](.env.example) override the UI. Full matrix: [docs/SETUP.md](docs/SETUP.md).
 
 ## Grill Me
 
-1. Run **Spec** (Synthesize) so the ticket has a spec.
-2. Open **Grill**. Start grill — questions come from the spec plus **Team → Docs** (the Grill Me skill lives there).
-3. Questions are assigned around the crew. Header **Working as** is who you are.
-4. Answer each one: type, tap the rec, or the mic. **Read all** speaks the frontier.
-5. Submit the round. Write plan treats those answers as binding.
+1. Run **Spec** so the ticket has a spec.
+2. Open **Grill**. Start grill — questions come from the spec plus **Team → Docs**.
+3. Header **Working as** is who you are. Answer: type, rec, or mic.
+4. Submit the round. Write plan treats those answers as binding.
 
 ## Scripts
 
@@ -72,11 +95,11 @@ Env vars in [`.env.example`](.env.example) override the UI on the server. Full m
 | --- | --- |
 | `npm run dev` | Dev server on `0.0.0.0:8080` |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Node tests (agents, grill, platform checks) |
+| `npm test` | Node tests |
 | `npm run build` | Production build |
 | `npm run preview` | Serve the production build |
 
-Workspace state (tickets, team, docs, execution) is in `localStorage` key `pit-studio-v2`. **Reset** restores sample tickets. **Team → Look → Reset team** restores pipeline defaults.
+Workspace state lives in `localStorage` (`pit-studio-v2`). **Reset** restores sample tickets. **Team → Look → Reset team** restores pipeline defaults.
 
 ## Layout
 

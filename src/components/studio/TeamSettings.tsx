@@ -36,8 +36,8 @@ export function TeamSettings() {
       <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden bg-surface shadow-panel md:h-5/6 md:rounded-xl md:border md:border-border">
         <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div>
-            <h2 className="font-serif text-2xl font-medium tracking-tight">Team studio</h2>
-            <p className="text-sm text-muted">Configure the workspace the whole crew runs from.</p>
+            <h2 className="font-serif text-2xl font-medium tracking-tight">Team AI Harness</h2>
+            <p className="text-sm text-muted">Mac-first. Hook Cursor or Claude locally, then pin an agent on each stage.</p>
           </div>
           <button
             type="button"
@@ -213,7 +213,7 @@ function PipelineTab() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        Rename, hide, or reorder stages. Each runnable stage picks its own agent — Cursor, Claude, GenAI Studio, or CIS. Inherit uses the workspace default from Execution.
+        Rename, hide, or reorder stages. Each runnable stage picks Cursor, Claude, Studio, or CIS. On a Mac, install those CLIs under Execution first. Inherit uses the workspace default.
       </p>
       <ul className="flex flex-col gap-2">
         {columns.map((col, i) => (
@@ -413,6 +413,49 @@ function DocsTab() {
   );
 }
 
+function MacAgentHints() {
+  return (
+    <section className="rounded-md border border-border p-3">
+      <h3 className="text-sm font-medium">Mac — hook the agents</h3>
+      <p className="mt-1 text-2xs text-muted">
+        Run these in Terminal.app or iTerm, then restart <span className="font-mono">npm run dev</span> in that same shell. Finder or a VS Code task will not see your zsh PATH.
+      </p>
+      <ol className="mt-3 flex list-decimal flex-col gap-3 pl-4 text-sm">
+        <li>
+          <p className="font-medium">Cursor Agent</p>
+          <Code>curl https://cursor.com/install -fsS | bash</Code>
+          <Code>{`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc`}</Code>
+          <p className="mt-1 text-2xs text-muted">
+            Confirm with <span className="font-mono">which agent</span>. If you only have <span className="font-mono">cursor-agent</span>, set Cursor command below to{" "}
+            <span className="font-mono">cursor-agent -p --output-format text</span>.
+          </p>
+        </li>
+        <li>
+          <p className="font-medium">Claude Code</p>
+          <Code>curl -fsSL https://claude.ai/install.sh | bash</Code>
+          <p className="mt-1 text-2xs text-muted">
+            Or <span className="font-mono">brew install --cask claude-code</span>. Confirm with <span className="font-mono">which claude</span>.
+          </p>
+        </li>
+        <li>
+          <p className="font-medium">Test, then turn off demo text</p>
+          <p className="text-2xs text-muted">
+            Use Test default agent. You want a path under <span className="font-mono">~/.local/bin</span>. Then uncheck demo fallbacks so Grill Me actually calls the CLI.
+          </p>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
+function Code({ children }: { children: string }) {
+  return (
+    <pre className="mt-1 overflow-x-auto rounded-sm bg-inset px-2 py-2 font-mono text-2xs leading-relaxed text-fg">
+      {children}
+    </pre>
+  );
+}
+
 function ExecutionTab() {
   const config = useBoardStore((s) => s.config);
   const patchConfig = useBoardStore((s) => s.patchConfig);
@@ -445,8 +488,9 @@ function ExecutionTab() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        Workspace defaults for stages set to Inherit. Pipeline pins Cursor, Claude, Studio, or CIS per stage. Cursor and Claude can run as a local CLI or a remote HTTP agent.
+        On a Mac the harness spawns Cursor or Claude from this machine. Install the CLI, put it on PATH, then Test. Pipeline still pins which agent each stage uses.
       </p>
+      <MacAgentHints />
       {exec.demoFallbacks ? (
         <p className="rounded-md border border-border px-3 py-2 text-sm text-muted">
           Demo text is on. If the agent is missing, Run still produces canned output. Turn this off once Cursor, Claude, or Studio is hooked up.
@@ -464,15 +508,20 @@ function ExecutionTab() {
         <span className="text-2xs text-muted">Default is {executionLabel(exec)}.</span>
       </div>
       {probe ? (
-        <p
+        <div
           role="status"
           className={cn(
             "rounded-md border px-3 py-2 text-sm",
             probe.ok ? "border-border text-fg" : "border-danger text-danger",
           )}
         >
-          {probe.ok ? `${probe.via}: ${probe.text || "ok"}` : probe.error || "Failed"}
-        </p>
+          <p>{probe.ok ? `${probe.via}: ${probe.text || "ok"}` : probe.error || "Failed"}</p>
+          {!probe.ok && /PATH|not on PATH/i.test(probe.error || "") ? (
+            <p className="mt-2 text-2xs text-muted">
+              Mac: add <span className="font-mono">~/.local/bin</span> to <span className="font-mono">~/.zshrc</span>, open a new Terminal, run <span className="font-mono">npm run dev</span> from there. If the binary is <span className="font-mono">cursor-agent</span>, change the Cursor command below.
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       <fieldset>

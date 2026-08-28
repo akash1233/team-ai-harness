@@ -75,7 +75,7 @@ agent --version
 
 If only `cursor-agent` exists, set Cursor command to `cursor-agent -p --output-format text`.
 
-Kindling calls the CLI in **print mode** (`-p`): one prompt in, text out. Cursor will not take a TTY, so it needs `--trust -f` (shipped default) or it stops on “Workspace Trust Required”. Check **Open Terminal.app** in Settings → Execution to watch the session in a background Terminal window — pipeline stages can take a while; that window is the real `agent` process.
+Kindling opens **Terminal.app as a live session** (`script` records a TTY). You talk to Cursor/Claude there — they can ask questions. Kindling tails the log into the ticket. Close the window when finished. Print mode (`-p`) is only used when Terminal is off.
 
 **Claude Code**
 

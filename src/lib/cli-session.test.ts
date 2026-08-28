@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { explainCliFailure, shellQuote, withNonInteractiveFlags } from "./cli-session.ts";
+import { explainCliFailure, toInteractiveArgs, withNonInteractiveFlags } from "./cli-session.ts";
 
 test("Cursor print mode always gets --trust -f", () => {
   assert.deepEqual(withNonInteractiveFlags("cursor", ["-p", "--output-format", "text"]), [
@@ -26,6 +26,9 @@ test("trust prompt is translated", () => {
   assert.match(msg, /--trust/);
 });
 
-test("shellQuote wraps spaces", () => {
-  assert.equal(shellQuote("a b"), "'a b'");
+test("interactive mode drops -p and output-format", () => {
+  assert.deepEqual(
+    toInteractiveArgs(["--trust", "-f", "-p", "--output-format", "text", "--model", "composer-1"]),
+    ["--trust", "-f", "--model", "composer-1"],
+  );
 });

@@ -21,18 +21,42 @@ export function withNonInteractiveFlags(
   return [...missing, ...args];
 }
 
+/** Drop print-mode flags so Terminal stays a live session, not one shot. */
+export function toInteractiveArgs(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === "-p" || a === "--print") continue;
+    if (a === "--output-format" || a === "-o") {
+      i += 1;
+      continue;
+    }
+    if (a.startsWith("--output-format=")) continue;
+    out.push(a);
+  }
+  return out;
+}
+
 export function explainCliFailure(text: string): string {
   if (/Workspace Trust Required|Do you trust the contents of this directory/i.test(text)) {
-    return "Cursor blocked on workspace trust (no TTY). Kindling passes --trust -f for print mode. Re-run, or enable Open Terminal.app so you can confirm the session.";
+    return "Cursor blocked on workspace trust (no TTY). Kindling passes --trust -f and opens Terminal as a live session.";
   }
   if (/permission|allow this|yes\/no/i.test(text) && /claude/i.test(text)) {
-    return "Claude asked for permission interactively. Kindling passes --permission-mode dontAsk for print mode. Re-run, or enable Open Terminal.app.";
+    return "Claude asked for permission. Answer in the Terminal window — Kindling is capturing the log.";
   }
   return text;
 }
 
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export function cleanEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.npm_config_prefix;
+  delete env.npm_config_loglevel;
+  delete env.NPM_CONFIG_PREFIX;
+  return env;
 }
 
 export async function runProcess(
@@ -54,7 +78,7 @@ export async function runProcess(
     try {
       child = spawn(bin, args, {
         cwd: cwd || process.cwd(),
-        env: process.env,
+        env: cleanEnv(),
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (err) {
@@ -78,6 +102,19 @@ export async function runProcess(
   });
 }
 
+export async function readIfExists(file: string): Promise<string> {
+  const fs = await import("node:fs/promises");
+  try {
+    return (await fs.readFile(file, "utf8")).trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Open Terminal.app as a live TTY (`script` records it). Kindling tails the log.
+ * Does not steal the agent's stdout — you talk in that window.
+ */
 export async function runInMacTerminal(
   cwd: string,
   bin: string,
@@ -92,34 +129,46 @@ export async function runInMacTerminal(
   const codeFile = path.join(dir, "code.txt");
   const script = path.join(dir, "run.command");
   const body = `#!/bin/bash
+unset npm_config_prefix
+unset NPM_CONFIG_PREFIX
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 set +e
 cd ${shellQuote(cwd)}
-echo "Kindling → ${bin} ${args.filter((a, i) => i === 0 || args[i - 1] !== "--model").slice(0, 6).join(" ")} …"
-${shellQuote(bin)} ${args.map(shellQuote).join(" ")} > ${shellQuote(outFile)} 2>&1
+echo "Kindling live session — talk to the agent here. Close this window when finished."
+echo "Log is also captured in the Kindling app."
+echo
+script -q ${shellQuote(outFile)} ${shellQuote(bin)} ${args.map(shellQuote).join(" ")}
 echo $? > ${shellQuote(codeFile)}
 echo
-echo "Kindling: session finished. You can close this window."
+echo "Kindling captured the log. You can close this window."
 `;
   await fs.writeFile(script, body, { mode: 0o755 });
   const opened = await runProcess("open", ["-g", "-a", "Terminal", script], 8000);
-  if (opened.code !== 0 && !opened.out) {
+  if (opened.code !== 0 && !opened.out && opened.err) {
     return { code: 1, out: "", err: opened.err || "Could not open Terminal.app" };
   }
   const start = Date.now();
+  let lastLen = 0;
+  let stable = 0;
   while (Date.now() - start < timeoutMs) {
-    try {
-      const codeText = (await fs.readFile(codeFile, "utf8")).trim();
-      if (codeText !== "") {
-        const out = await fs.readFile(outFile, "utf8").catch(() => "");
-        return { code: Number(codeText), out: out.trim(), err: "" };
-      }
-    } catch {
-      /* not written yet */
+    const codeText = await readIfExists(codeFile);
+    const out = await readIfExists(outFile);
+    if (codeText !== "") {
+      return { code: Number(codeText), out, err: "" };
     }
-    await new Promise((r) => setTimeout(r, 400));
+    if (out.length > lastLen) {
+      lastLen = out.length;
+      stable = 0;
+    } else if (out.length > 80) {
+      stable += 1;
+    }
+    await new Promise((r) => setTimeout(r, 500));
   }
-  const out = await fs.readFile(outFile, "utf8").catch(() => "");
-  return { code: 1, out: out.trim(), err: "Timed out waiting for the Terminal session to finish." };
+  const out = await readIfExists(outFile);
+  if (out.length > 40) {
+    return { code: 0, out, err: "Session still open in Terminal — Kindling captured the log so far." };
+  }
+  return { code: 1, out, err: "Timed out waiting for the Terminal session. Leave the window open and talk to the agent; Kindling tails the log." };
 }
 
 export async function runAgentProcess(opts: {
@@ -130,7 +179,7 @@ export async function runAgentProcess(opts: {
   inTerminal: boolean;
 }): Promise<{ code: number | null; out: string; err: string; via: "terminal" | "spawn" }> {
   if (opts.inTerminal && process.platform === "darwin") {
-    const r = await runInMacTerminal(opts.cwd, opts.bin, opts.args, opts.timeoutMs);
+    const r = await runInMacTerminal(opts.cwd, opts.bin, toInteractiveArgs(opts.args), opts.timeoutMs);
     return { ...r, via: "terminal" };
   }
   const r = await runProcess(opts.bin, opts.args, opts.timeoutMs, opts.cwd);

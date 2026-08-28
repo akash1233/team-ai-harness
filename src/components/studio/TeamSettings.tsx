@@ -768,7 +768,7 @@ function ExecutionTab() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        Kindling does not embed Cursor or Claude. It shells out to their CLIs — the same <span className="font-mono">agent</span> / <span className="font-mono">claude</span> you run in Terminal. Print mode (<span className="font-mono">-p</span>) is one prompt in, text out, stored as the stage output. Long sessions open Terminal.app in the background so you can watch. No TTY means Cursor asks for workspace trust — we pass <span className="font-mono">--trust -f</span> so print mode is not interactive.
+        Kindling opens Terminal.app as a <strong>live session</strong> (not a one-shot command). Talk to Cursor or Claude there — they can ask you questions. Kindling records the session with <span className="font-mono">script</span> and shows the log here. Close the Terminal window when you are done.
       </p>
       <MacAgentHints />
       {exec.demoFallbacks ? (
@@ -790,7 +790,7 @@ function ExecutionTab() {
             checked={exec.runInTerminal !== false}
             onChange={(e) => patch({ runInTerminal: e.target.checked })}
           />
-          Open Terminal.app in the background (Mac) so you can watch the session
+          Open Terminal.app as a live session (Mac). You talk there; Kindling captures the log.
         </label>
         <Field label="Workspace directory (trust root)">
           <Input

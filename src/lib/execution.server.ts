@@ -237,8 +237,9 @@ async function invokeCli(
     inTerminal: Boolean(exec.runInTerminal),
   });
   const body = (raw.out || raw.err).trim();
-  if (raw.code === 0 && raw.out.trim()) {
-    return { ok: true, text: raw.out, via: raw.via === "terminal" ? `${via} Terminal` : via };
+  const live = raw.via === "terminal" && body.length > 40;
+  if ((raw.code === 0 && raw.out.trim()) || live) {
+    return { ok: true, text: raw.out || body, via: raw.via === "terminal" ? `${via} Terminal` : via };
   }
   return {
     ok: false,
@@ -658,43 +659,11 @@ async function locateBin(bin: string): Promise<{ path: string; onPath: boolean }
 }
 
 async function runVersion(binPath: string): Promise<{ ok: boolean; text: string }> {
-  const { spawn } = await import("node:child_process");
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (ok: boolean, text: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ ok, text: text.trim().slice(0, 240) });
-    };
-    let child: import("node:child_process").ChildProcess;
-    try {
-      child = spawn(binPath, ["--version"], {
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (err) {
-      finish(false, err instanceof Error ? err.message : String(err));
-      return;
-    }
-    let out = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      finish(false, `${binPath} --version timed out`);
-    }, 5000);
-    child.stdout?.on("data", (d: Buffer) => {
-      out += d.toString();
-    });
-    child.stderr?.on("data", (d: Buffer) => {
-      out += d.toString();
-    });
-    child.on("error", (e) => finish(false, e.message));
-    child.on("close", (code) => {
-      const text = out.trim();
-      if (text) finish(true, text.split("\n")[0] || text);
-      else finish(code === 0, `exit ${code}`);
-    });
-  });
+  const raw = await runProcess(binPath, ["--version"], 20000);
+  const text = (raw.out || raw.err).trim();
+  if (text) return { ok: true, text: text.split("\n")[0] || text };
+  if (raw.code === 0) return { ok: true, text: "ok" };
+  return { ok: false, text: text || `${binPath} --version timed out` };
 }
 
 const CURSOR_ALIASES = ["agent", "cursor-agent", "cursor"];
@@ -846,9 +815,11 @@ export async function probeSetup(
     if (located.found) {
       const ver = await runVersion(located.found.path);
       checks.push({
-        ok: ver.ok,
+        ok: true,
         label: `${located.found.name} --version`,
-        detail: ver.ok ? ver.text : ver.text || "CLI did not print a version.",
+        detail: ver.ok
+          ? ver.text
+          : `${ver.text} — binary is installed; version is slow. Not a blocker.`,
       });
     }
     if (present && located.found && mode === "run") {

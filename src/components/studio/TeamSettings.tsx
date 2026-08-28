@@ -774,14 +774,24 @@ function ExecutionTab() {
       for (let i = 0; i < 80; i++) {
         await new Promise((r) => setTimeout(r, 500));
         const poll = await testExecution({ data: { phase: "poll", sessionDir: dir } });
-        setProbe((prev) => ({
+        const checks = [
+          ...(started.checks ?? []),
+          {
+            ok: poll.done ? poll.ok : true,
+            label: poll.done ? "Test run" : "Test run (streaming)",
+            detail: poll.done
+              ? (poll.ok ? (poll.log ?? "").slice(-1200) : poll.error || (poll.log ?? "").slice(-1200))
+              : `streaming ${Math.round((i + 1) * 0.5)}s`,
+          },
+        ];
+        setProbe({
           ok: poll.done ? poll.ok : true,
           via: started.via,
           text: poll.done ? (poll.ok ? "Test finished" : poll.error || "Failed") : `Streaming log… ${Math.round((i + 1) * 0.5)}s`,
           error: poll.done ? poll.error : undefined,
-          checks: started.checks,
-          log: poll.log || prev?.log,
-        }));
+          checks,
+          log: poll.log || started.log,
+        });
         if (poll.done) return;
       }
       setProbe((prev) => ({
@@ -892,6 +902,46 @@ function ExecutionTab() {
         </div>
       </section>
 
+      <section
+        className={cn(
+          "flex flex-col gap-2 rounded-md border p-3",
+          probe && !probe.ok ? "border-danger" : "border-border",
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">App log</h3>
+          {probe ? (
+            <span className={cn("text-2xs", probe.ok ? "text-muted" : "text-danger")}>
+              {busy ? probe.text : probe.ok ? `Pass · ${probe.via}` : `Fail · ${probe.via}`}
+            </span>
+          ) : (
+            <span className="text-2xs text-muted">Run a test to stream command + stdout here</span>
+          )}
+        </div>
+        {probe?.checks?.length ? (
+          <ul className="flex flex-col gap-1">
+            {probe.checks.map((c) => (
+              <li key={c.label} className="text-2xs">
+                <span className={cn("font-medium", c.ok ? "text-fg" : "text-danger")}>
+                  {c.ok ? "Pass" : "Fail"} · {c.label}
+                </span>
+                {c.detail && c.detail.length < 200 ? (
+                  <span className="text-muted"> — {c.detail.split("\n")[0]}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <pre className="max-h-80 min-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-inset p-3 font-mono text-2xs text-fg">
+          {probe?.log || probe?.error || "Waiting for a test…\nYou should see [kindling] start, the exact CLI, then the agent stdout."}
+        </pre>
+        {probe && !probe.ok && /PATH|not on PATH|not on Node PATH/i.test(probe.error || probe.text || "") ? (
+          <p className="text-2xs text-muted">
+            Mac: add <span className="font-mono">~/.local/bin</span> to PATH, restart <span className="font-mono">npm run dev</span> from Terminal.
+          </p>
+        ) : null}
+      </section>
+
       <section className="flex flex-col gap-3 rounded-md border border-border p-3">
         <h3 className="text-sm font-medium">MCP</h3>
         <p className="text-2xs text-muted">
@@ -926,39 +976,6 @@ function ExecutionTab() {
           </button>
         </div>
       </section>
-      {probe ? (
-        <div
-          role="status"
-          className={cn(
-            "rounded-md border px-3 py-2 text-sm",
-            probe.ok ? "border-border text-fg" : "border-danger text-danger",
-          )}
-        >
-          <p className="font-medium">{probe.ok ? `Setup looks good · ${probe.via}` : `Setup incomplete · ${probe.via}`}</p>
-          {probe.checks?.length ? (
-            <ul className="mt-2 flex flex-col gap-2">
-              {probe.checks.map((c) => (
-                <li key={c.label} className="text-2xs">
-                  <span className={cn("font-medium", c.ok ? "text-fg" : "text-danger")}>{c.ok ? "Pass" : "Fail"} · {c.label}</span>
-                  <span className="mt-0.5 block whitespace-pre-wrap text-muted">{c.detail}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-1">{probe.ok ? probe.text || "ok" : probe.error || "Failed"}</p>
-          )}
-          {probe.log ? (
-            <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-inset p-2 font-mono text-2xs text-fg">
-              {probe.log}
-            </pre>
-          ) : null}
-          {!probe.ok && /PATH|not on PATH|not on Node PATH/i.test(probe.error || probe.text || "") ? (
-            <p className="mt-2 text-2xs text-muted">
-              Mac: add <span className="font-mono">~/.local/bin</span> to <span className="font-mono">~/.zshrc</span>, open a new Terminal, run <span className="font-mono">npm run dev</span> from there. If the binary is <span className="font-mono">cursor-agent</span>, change the Cursor command below.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
 
       <fieldset>
         <legend className="mb-2 text-sm font-medium">Default for Inherit</legend>

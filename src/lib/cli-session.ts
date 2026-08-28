@@ -211,7 +211,7 @@ export async function startMacSession(
   if (prompt !== undefined) await fs.writeFile(promptFile, prompt);
   await fs.writeFile(
     outFile,
-    `[kindling] ${new Date().toISOString()} starting\n[kindling] ${bin} ${args.join(" ")}${prompt !== undefined ? " $(cat prompt.md)" : ""}\n`,
+    `[kindling] ${new Date().toISOString()} starting\n[kindling] cwd ${cwd}\n[kindling] ${bin} ${args.join(" ")}${prompt !== undefined ? " $(cat prompt.md)" : ""}\n${prompt !== undefined ? `[kindling] prompt: ${prompt.slice(0, 240).replace(/\n/g, " ")}\n` : ""}`,
   );
   const body = `#!/bin/bash
 unset npm_config_prefix

@@ -1,0 +1,169 @@
+export type TicketStatus = "idle" | "executing" | "blocked" | "done";
+
+export type ColumnRole =
+  | "collect-input"
+  | "prompt"
+  | "review"
+  | "plan"
+  | "approve"
+  | "terminal";
+
+export type RailTone = "run" | "review" | "gate" | "idle" | "blocked";
+
+export type ThemeId = "paper" | "ink";
+export type DensityId = "comfortable" | "compact";
+
+export type ExecutionProvider = "local" | "studio" | "cis";
+export type LocalAgent = "cursor" | "claude";
+export type AgentKind = "cursor" | "claude" | "studio" | "cis";
+export type AgentTarget = "local" | "remote";
+export type StepAgent = "inherit" | AgentKind;
+
+export type ExecutionConfig = {
+  defaultAgent: AgentKind;
+  cursorTarget: AgentTarget;
+  claudeTarget: AgentTarget;
+  cursorCommand: string;
+  claudeCommand: string;
+  localHttpUrl: string;
+  cursorRemoteUrl: string;
+  claudeRemoteUrl: string;
+  studioBaseUrl: string;
+  featureKey: string;
+  promptId: string;
+  cisProvider: string;
+  cisModel: string;
+  cisTaskType: string;
+  timeoutMs: number;
+  demoFallbacks: boolean;
+  /** @deprecated hydrated from older workspaces */
+  provider?: ExecutionProvider;
+  /** @deprecated hydrated from older workspaces */
+  localAgent?: LocalAgent;
+};
+
+export type AgentResponse = {
+  id: string;
+  at: string;
+  columnId: string;
+  summary: string;
+  body: string;
+  via?: string;
+};
+
+export type GrillQuestion = {
+  n: number;
+  question: string;
+  recommended: string;
+  answer: string;
+  source?: string;
+  assigneeId?: string;
+  answeredBy?: string;
+  answeredAt?: string;
+};
+
+export type GrillRound = {
+  id: string;
+  questions: GrillQuestion[];
+  submitted: boolean;
+};
+
+export type PlanStep = {
+  title: string;
+  detail: string;
+  references: string[];
+  createdKey?: string;
+};
+
+export type Plan = {
+  summary: string;
+  findings: string[];
+  scope: string[];
+  outOfScope: string[];
+  risks: string[];
+  steps: PlanStep[];
+};
+
+export type SlackPost = {
+  channel: string;
+  channelId: string;
+  ts: string;
+};
+
+export type JiraIssue = {
+  key: string;
+  title: string;
+  kind: "epic" | "story";
+};
+
+export type WorkflowColumn = {
+  id: string;
+  name: string;
+  label: string;
+  role: ColumnRole;
+  rail: RailTone;
+  promptTemplate?: string;
+  promptId?: string;
+  agent?: StepAgent;
+  enabled: boolean;
+  locked?: boolean;
+  custom?: boolean;
+};
+
+export type TeamDoc = {
+  id: string;
+  title: string;
+  kind: "skill" | "notes" | "spec";
+  body: string;
+};
+
+export type TeamMember = {
+  id: string;
+  name: string;
+  handle: string;
+  role: string;
+};
+
+export type TeamConfig = {
+  name: string;
+  workflowName: string;
+  jiraPrefix: string;
+  defaultSlackChannel: string;
+  defaultSlackChannelId: string;
+  members: TeamMember[];
+  labels: string[];
+  columns: WorkflowColumn[];
+  docs: TeamDoc[];
+  theme: ThemeId;
+  density: DensityId;
+  showSpend: boolean;
+  autoAdvance: boolean;
+  execution: ExecutionConfig;
+};
+
+export type Ticket = {
+  id: string;
+  key: string;
+  title: string;
+  description: string;
+  labels: string[];
+  columnId: string;
+  status: TicketStatus;
+  blockedReason?: string;
+  spend: number;
+  runId: string;
+  ownerId?: string;
+  slackChannel: string;
+  slackChannelId: string;
+  slackMembers: string;
+  slackPosted?: SlackPost;
+  ideationNotes: string;
+  transcript: string;
+  outputs: Record<string, string>;
+  agentResponses: AgentResponse[];
+  grillRounds: GrillRound[];
+  fryComplete: boolean;
+  plan: Plan | null;
+  jiraCreated: JiraIssue[];
+  createdAt: string;
+};

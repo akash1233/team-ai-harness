@@ -90,9 +90,10 @@ export function createDefaultExecution(): ExecutionConfig {
     claudeTestModel: "haiku",
     cursorTestModel: "",
     workspaceDir: "",
-    cursorExtraArgs: "--trust -f",
-    claudeExtraArgs: "",
+    cursorExtraArgs: "--trust",
+    claudeExtraArgs: "--permission-mode default",
     runInTerminal: true,
+    fullAgentMode: false,
     provider: "local",
     localAgent: "cursor",
   };

@@ -2,6 +2,7 @@ import { createDefaultExecution } from "./team-config";
 import { legacyDefaultAgent, resolveStep } from "./agents";
 import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing";
 import {
+  ensurePrintMode,
   explainCliFailure,
   isNoiseLog,
   readSession,
@@ -10,7 +11,7 @@ import {
   sessionShouldStop,
   startMacSession,
   withNonInteractiveFlags,
-  withoutAutoMode,
+  withoutFullAgentMode,
 } from "./cli-session";
 import type { AgentKind, ExecutionConfig, StepAgent, TokenUsage } from "./types";
 
@@ -83,6 +84,7 @@ export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
     cursorExtraArgs: envStr("PIT_CURSOR_EXTRA_ARGS") || base.cursorExtraArgs || "--trust -f",
     claudeExtraArgs: envStr("PIT_CLAUDE_EXTRA_ARGS") || base.claudeExtraArgs || "",
     runInTerminal: envStr("PIT_RUN_IN_TERMINAL") === "0" ? false : envStr("PIT_RUN_IN_TERMINAL") === "1" ? true : base.runInTerminal !== false,
+    fullAgentMode: envStr("PIT_FULL_AGENT") === "1" ? true : envStr("PIT_FULL_AGENT") === "0" ? false : Boolean(base.fullAgentMode),
   };
 }
 
@@ -229,17 +231,21 @@ async function invokeCli(
   if (!found) {
     return { ok: false, text: "", via, error: `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.` };
   }
-  const flags = withNonInteractiveFlags(
-    kind,
-    [...args, ...extraArgs],
-    kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
-  );
+  const flags = (() => {
+    const base = withNonInteractiveFlags(
+      kind,
+      [...args, ...extraArgs],
+      kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
+    );
+    return exec.fullAgentMode ? base : ensurePrintMode(withoutFullAgentMode(base));
+  })();
   const raw = await runAgentProcess({
     bin: found,
     args: [...flags, prompt],
     cwd: workspaceOf(exec),
     timeoutMs: timeoutMs ?? exec.timeoutMs,
     inTerminal: Boolean(exec.runInTerminal),
+    fullAgent: Boolean(exec.fullAgentMode),
   });
   const body = (raw.out || raw.err).trim();
   const live = raw.via === "terminal" && body.length > 40;
@@ -909,13 +915,12 @@ export async function startAgentTest(opts: {
     args = opts.mcpServer?.trim() ? ["mcp", "get", opts.mcpServer.trim()] : ["mcp", "list"];
   } else {
     const extra = model ? ["--model", model] : [];
-    const flags = withoutAutoMode(
-      withNonInteractiveFlags(
-        step.kind,
-        [...located.args, ...extra],
-        step.kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
-      ),
+    const built = withNonInteractiveFlags(
+      step.kind,
+      [...located.args, ...extra],
+      step.kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
     );
+    const flags = exec.fullAgentMode ? built : ensurePrintMode(withoutFullAgentMode(built));
     args = [...flags, opts.mcp ? `List your MCP tools, then: ${prompt}` : prompt];
   }
   if (!exec.runInTerminal || process.platform !== "darwin") {

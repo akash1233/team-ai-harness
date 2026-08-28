@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { explainCliFailure, isNoiseLog, toInteractiveArgs, withoutAutoMode, withNonInteractiveFlags } from "./cli-session.ts";
+import { ensurePrintMode, explainCliFailure, isNoiseLog, toInteractiveArgs, withoutFullAgentMode, withNonInteractiveFlags } from "./cli-session.ts";
 
-test("Cursor print mode always gets --trust -f", () => {
+test("Cursor print mode always gets --trust", () => {
   assert.deepEqual(withNonInteractiveFlags("cursor", ["-p", "--output-format", "text"]), [
     "--trust",
-    "-f",
     "-p",
     "--output-format",
     "text",
@@ -17,8 +16,8 @@ test("does not duplicate --trust", () => {
   assert.equal(args.filter((a) => a === "--trust").length, 1);
 });
 
-test("Claude print mode does not add auto permissions", () => {
-  assert.deepEqual(withNonInteractiveFlags("claude", ["-p"]), ["-p"]);
+test("Claude print mode uses permission-mode default, not auto", () => {
+  assert.deepEqual(withNonInteractiveFlags("claude", ["-p"]), ["--permission-mode", "default", "-p"]);
 });
 
 test("trust prompt is translated", () => {
@@ -33,8 +32,13 @@ test("interactive mode drops -p and output-format", () => {
   );
 });
 
-test("withoutAutoMode strips dontAsk", () => {
-  assert.deepEqual(withoutAutoMode(["--permission-mode", "dontAsk", "-p"]), ["-p"]);
+test("withoutFullAgentMode strips yolo, force, and dontAsk", () => {
+  assert.deepEqual(withoutFullAgentMode(["--trust", "-f", "--yolo", "-p"]), ["--trust", "-p"]);
+  assert.deepEqual(withoutFullAgentMode(["--permission-mode", "dontAsk", "-p"]), ["-p"]);
+});
+
+test("ensurePrintMode adds -p when missing", () => {
+  assert.deepEqual(ensurePrintMode(["--trust"]), ["-p", "--output-format", "text", "--trust"]);
 });
 
 test("retrieval-only log is noise", () => {

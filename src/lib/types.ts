@@ -69,6 +69,11 @@ export type ExecutionConfig = {
   claudeExtraArgs?: string;
   /** Mac: open Terminal.app in the background so you can watch the session. */
   runInTerminal?: boolean;
+  /**
+   * Full agent / auto (yolo, dontAsk, -f). Workday blocks this outside a
+   * dev container — leave off. Print/ask only.
+   */
+  fullAgentMode?: boolean;
   /** @deprecated hydrated from older workspaces */
   provider?: ExecutionProvider;
   /** @deprecated hydrated from older workspaces */

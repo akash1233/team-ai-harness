@@ -827,7 +827,18 @@ function ExecutionTab() {
             checked={exec.runInTerminal !== false}
             onChange={(e) => patch({ runInTerminal: e.target.checked })}
           />
-          Open Terminal.app as a live session (Mac). You talk there; Kindling captures the log.
+          Open Terminal.app and tee print-mode output into the app log
+        </label>
+        <label className="flex min-h-11 items-start gap-3 text-sm">
+          <input
+            className="mt-1"
+            type="checkbox"
+            checked={Boolean(exec.fullAgentMode)}
+            onChange={(e) => patch({ fullAgentMode: e.target.checked })}
+          />
+          <span>
+            Allow full agent / auto (yolo, dontAsk, -f). Leave off — Workday blocks this outside a dev container. Kindling uses print/ask only.
+          </span>
         </label>
         <Field label="Workspace directory (trust root)">
           <Input
@@ -977,7 +988,7 @@ function ExecutionTab() {
         <Field label="Print-mode flags (non-interactive)">
           <Input
             className="font-mono"
-            value={exec.cursorExtraArgs ?? "--trust -f"}
+            value={exec.cursorExtraArgs ?? "--trust"}
             onChange={(e) => patch({ cursorExtraArgs: e.target.value })}
           />
         </Field>
@@ -1011,7 +1022,7 @@ function ExecutionTab() {
         <Field label="Print-mode flags (non-interactive)">
           <Input
             className="font-mono"
-            value={exec.claudeExtraArgs ?? ""}
+            value={exec.claudeExtraArgs ?? "--permission-mode default"}
             onChange={(e) => patch({ claudeExtraArgs: e.target.value })}
           />
         </Field>

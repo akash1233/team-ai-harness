@@ -5,7 +5,7 @@ export function withNonInteractiveFlags(
   extraLine = "",
 ): string[] {
   const extra = extraLine.trim().split(/\s+/).filter(Boolean);
-  const defaults = kind === "cursor" ? ["--trust", "-f"] : [];
+  const defaults = kind === "cursor" ? ["--trust"] : ["--permission-mode", "default"];
   const add = extra.length ? extra : defaults;
   const have = new Set(args);
   const missing: string[] = [];
@@ -21,7 +21,10 @@ export function withNonInteractiveFlags(
   return [...missing, ...args];
 }
 
-/** Drop print-mode flags so Terminal stays a live session, not one shot. */
+export function ensurePrintMode(args: string[]): string[] {
+  if (args.includes("-p") || args.includes("--print")) return args;
+  return ["-p", "--output-format", "text", ...args];
+}
 export function toInteractiveArgs(args: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -37,12 +40,20 @@ export function toInteractiveArgs(args: string[]): string[] {
   return out;
 }
 
-/** Workday Claude blocks auto mode outside a dev container. */
-export function withoutAutoMode(args: string[]): string[] {
+/** Workday: full agent / auto is blocked. Print + ask only. */
+export function withoutFullAgentMode(args: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
-    if (a === "--dangerously-skip-permissions") continue;
+    if (
+      a === "--dangerously-skip-permissions" ||
+      a === "--yolo" ||
+      a === "-f" ||
+      a === "--force" ||
+      a === "--approve-mcps"
+    ) {
+      continue;
+    }
     if (a === "--permission-mode") {
       const next = args[i + 1] || "";
       if (/dontAsk|bypassPermissions|auto/i.test(next)) {
@@ -53,6 +64,11 @@ export function withoutAutoMode(args: string[]): string[] {
     out.push(a);
   }
   return out;
+}
+
+/** @deprecated use withoutFullAgentMode */
+export function withoutAutoMode(args: string[]): string[] {
+  return withoutFullAgentMode(args);
 }
 
 export function stripAnsi(text: string): string {
@@ -252,8 +268,9 @@ export async function runAgentProcess(opts: {
   cwd: string;
   timeoutMs: number;
   inTerminal: boolean;
+  fullAgent?: boolean;
 }): Promise<{ code: number | null; out: string; err: string; via: "terminal" | "spawn" }> {
-  const args = withoutAutoMode(opts.args);
+  const args = opts.fullAgent ? opts.args : withoutFullAgentMode(opts.args);
   if (opts.inTerminal && process.platform === "darwin") {
     const r = await runInMacTerminal(opts.cwd, opts.bin, args, opts.timeoutMs);
     return { ...r, out: stripAnsi(r.out), err: stripAnsi(r.err), via: "terminal" };

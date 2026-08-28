@@ -65,6 +65,14 @@ test("spec (Studio) prompt reads brief + transcript from prior stages", () => {
   assert.match(filled, /ship voice on Grill first/);
 });
 
+test("harvestVars stores only the stage text under the variable name", () => {
+  const col = { id: "s1", name: "Draft", label: "Draft", role: "prompt" as const, rail: "run" as const, enabled: true, outputKey: "agenda" };
+  const t = ticket();
+  const vars = harvestVars(t, col, "  Meeting agenda\nItem 1  ");
+  assert.equal(vars.agenda, "Meeting agenda\nItem 1");
+  assert.equal(vars.prev, "Meeting agenda\nItem 1");
+});
+
 test("tickets start on first agent stage if there is no collect-input", () => {
   const cols = [
     { id: "test", name: "Test", label: "Test", role: "prompt" as const, rail: "run" as const, enabled: true },

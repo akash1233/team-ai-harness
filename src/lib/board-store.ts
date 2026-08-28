@@ -25,6 +25,7 @@ import {
   patchActiveFlow,
   writeFlowColumns,
 } from "./team-config";
+import { stageOutputFromLog } from "./cli-session";
 import { harvestVars, outputVarName } from "./flow-context";
 import { promptIdForColumn, resolveStagePrompt } from "./prompts";
 import { assignQuestions } from "./grill";
@@ -88,6 +89,7 @@ type BoardState = {
   handoffTicket: (id: string, flowId: string) => Promise<void>;
   setActiveFlow: (id: string) => void;
   addFlow: () => void;
+  addExampleFlow: () => void;
   duplicateFlow: (id?: string) => void;
   removeFlow: (id: string) => void;
   patchFlow: (patch: Partial<Flow>) => void;
@@ -358,7 +360,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       get().approve(ticket.id);
       return;
     }
-    if (col.role === "collect-input" || col.role === "terminal") return;
+    if (col.role === "terminal") return;
     await get().runTicket(ticket.id);
   },
 
@@ -369,11 +371,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     if (!col) return;
 
     if (col.role === "collect-input") {
+      let output = "";
       if (col.id === IDEATION_COLUMN_ID) {
         const channel = ticket.slackChannel.trim();
         const members = ticket.slackMembers.trim();
-        if (!channel && !members) return;
-        const output = [
+        output = [
           channel ? `Slack channel: #${channel.replace(/^#+/, "")}` : "",
           ticket.slackChannelId ? `Channel ID: ${ticket.slackChannelId}` : "",
           members ? `Team members: ${members}` : "",
@@ -381,28 +383,21 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         ]
           .filter(Boolean)
           .join("\n");
-        set({
-          tickets: withTicket(get().tickets, id, (t) => ({
-            ...t,
-            outputs: { ...t.outputs, [IDEATION_COLUMN_ID]: output },
-            vars: harvestVars({ ...t, vars: t.vars ?? {} }, col, output),
-          })),
-        });
-        await get().continueAfter(id);
-        return;
+      } else if (col.id === TRANSCRIPT_COLUMN_ID) {
+        output = ticket.transcript.trim();
+      } else {
+        output = (ticket.ideationNotes || ticket.description || ticket.vars?.input || "").trim();
       }
-      if (col.id === TRANSCRIPT_COLUMN_ID) {
-        if (!ticket.transcript.trim()) return;
-        set({
-          tickets: withTicket(get().tickets, id, (t) => ({
-            ...t,
-            outputs: { ...t.outputs, [TRANSCRIPT_COLUMN_ID]: t.transcript },
-            vars: harvestVars({ ...t, vars: t.vars ?? {} }, col, t.transcript),
-          })),
-        });
-        await get().continueAfter(id);
-        return;
-      }
+      if (!output) return;
+      set({
+        tickets: withTicket(get().tickets, id, (t) => ({
+          ...t,
+          outputs: { ...t.outputs, [col.id]: output },
+          vars: harvestVars({ ...t, vars: t.vars ?? {} }, col, output),
+        })),
+      });
+      await get().continueAfter(id);
+      return;
     }
 
     if (col.role === "review" || col.role === "approve") {
@@ -455,7 +450,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         at: new Date().toISOString(),
         columnId: latest.columnId,
         summary: result.via ? `${result.summary} · ${result.via}` : result.summary,
-        body: result.text,
+        body: stageOutputFromLog(result.text),
         via: result.via,
         ok: true,
         spend: spendDelta,
@@ -485,12 +480,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
                 ]
               : t.grillRounds;
           const body =
-            t.columnId === FRY_COLUMN_ID && !result.grill?.frontierEmpty ? "" : result.text;
+            t.columnId === FRY_COLUMN_ID && !result.grill?.frontierEmpty
+              ? ""
+              : stageOutputFromLog(result.text);
           const nextVars = {
             ...(body ? harvestVars({ ...t, vars: t.vars ?? {} }, liveCol, body) : t.vars ?? {}),
           };
           if (result.plan) nextVars.plan = JSON.stringify(result.plan, null, 2);
-          if (result.grill?.frontierEmpty && result.text) nextVars.grill = result.text;
+          if (result.grill?.frontierEmpty && result.text) nextVars.grill = stageOutputFromLog(result.text);
           return {
             ...t,
             status: "idle",
@@ -499,7 +496,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
             outputs:
               t.columnId === FRY_COLUMN_ID && !result.grill?.frontierEmpty
                 ? t.outputs
-                : { ...t.outputs, [t.columnId]: result.text },
+                : { ...t.outputs, [t.columnId]: body },
             vars: nextVars,
             agentResponses: [response, ...t.agentResponses],
             grillRounds,
@@ -1063,6 +1060,76 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     };
     const config = applyActiveFlow({ ...get().config, flows: [...get().config.flows, flow] }, id);
     set({ config, selectedId: null, activeStageId: stageId });
+    get().persist();
+  },
+
+  addExampleFlow: () => {
+    const id = `flow-${uid()}`;
+    const cap = `stage-${uid("col")}`;
+    const draft = `stage-${uid("col")}`;
+    const echo = `stage-${uid("col")}`;
+    const pDraft = promptIdForColumn(draft);
+    const pEcho = promptIdForColumn(echo);
+    const flow: Flow = {
+      id,
+      name: "Capture → Cursor → Echo",
+      description: "Human notes become {{brief}}. Cursor writes {{agenda}}. Next stage prints {{agenda}} only.",
+      autoAdvance: true,
+      autoRun: false,
+      columns: [
+        {
+          id: cap,
+          name: "Capture",
+          label: "Capture",
+          role: "collect-input",
+          rail: "run",
+          enabled: true,
+          custom: true,
+          outputKey: "brief",
+        },
+        {
+          id: draft,
+          name: "Draft",
+          label: "Draft",
+          role: "prompt",
+          rail: "run",
+          enabled: true,
+          custom: true,
+          agent: "cursor",
+          outputKey: "agenda",
+          promptRef: pDraft,
+        },
+        {
+          id: echo,
+          name: "Echo",
+          label: "Echo",
+          role: "prompt",
+          rail: "run",
+          enabled: true,
+          custom: true,
+          agent: "cursor",
+          outputKey: "echo",
+          promptRef: pEcho,
+        },
+      ],
+    };
+    const prompts: TeamPrompt[] = [
+      ...(get().config.prompts ?? []),
+      {
+        id: pDraft,
+        name: "Draft from brief",
+        body: "Using only the captured input below, write a short agenda.\n\n{{brief}}\n\nReply with the agenda only.",
+        skillIds: [],
+      },
+      {
+        id: pEcho,
+        name: "Echo previous",
+        body: "Print the previous stage output exactly. No extra words.\n\n{{agenda}}",
+        skillIds: [],
+      },
+    ];
+    const config = applyActiveFlow({ ...get().config, prompts, flows: [...get().config.flows, flow] }, id);
+    set({ config, selectedId: null, activeStageId: cap });
     get().persist();
   },
 

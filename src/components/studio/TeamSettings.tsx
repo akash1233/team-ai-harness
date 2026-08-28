@@ -247,6 +247,7 @@ function FlowsTab() {
   const tickets = useBoardStore((s) => s.tickets);
   const setActiveFlow = useBoardStore((s) => s.setActiveFlow);
   const addFlow = useBoardStore((s) => s.addFlow);
+  const addExampleFlow = useBoardStore((s) => s.addExampleFlow);
   const duplicateFlow = useBoardStore((s) => s.duplicateFlow);
   const removeFlow = useBoardStore((s) => s.removeFlow);
   const patchFlow = useBoardStore((s) => s.patchFlow);
@@ -256,7 +257,7 @@ function FlowsTab() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        A flow is a pipeline. <strong className="font-medium text-fg">New flow</strong> starts blank (one empty stage). <strong className="font-medium text-fg">Duplicate</strong> copies the current one. Tickets stay on the flow they were created in.
+        A flow is a pipeline. <strong className="font-medium text-fg">New flow</strong> starts blank. <strong className="font-medium text-fg">Example</strong> is Capture (human) → Draft (Cursor, {"{{brief}}"}) → Echo (prints {"{{agenda}}"} only). Duplicate copies the current one.
       </p>
       <div className="flex flex-wrap gap-1">
         {config.flows.map((f) => (
@@ -280,6 +281,9 @@ function FlowsTab() {
         <Button variant="secondary" size="md" onClick={() => addFlow()}>
           <Plus className="size-4" />
           New flow
+        </Button>
+        <Button variant="secondary" size="md" onClick={() => addExampleFlow()}>
+          Example: Capture → Cursor → Echo
         </Button>
         <Button variant="ghost" size="md" onClick={() => duplicateFlow(flow.id)}>
           Duplicate
@@ -351,7 +355,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
     <div className="flex flex-col gap-3">
       <div className="rounded-md border border-border bg-inset px-3 py-2 text-sm text-muted">
         <p>
-          This tab only <strong className="font-medium text-fg">designs</strong> the flow: name, agent, prompt, variable. Close settings and run it on the board — that is where Terminal opens and the last agent reply becomes the stage output.
+          This tab only <strong className="font-medium text-fg">designs</strong> the flow. Run it on the board. Suggested: 01 Team types this → variable <span className="font-mono">brief</span>. 02 Agent runs Cursor, prompt uses <span className="font-mono">{"{{brief}}"}</span>, variable <span className="font-mono">agenda</span>. 03 Agent prompt is “print {"{{agenda}}"} exactly” so you can see the handoff. The variable is the last agent reply only — no logs.
         </p>
       </div>
       <ul className="flex flex-col gap-2">

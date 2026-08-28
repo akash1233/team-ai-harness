@@ -194,6 +194,7 @@ function StepBody({ ticket }: { ticket: Ticket }) {
   if (!col) return null;
   if (col.role === "collect-input" && col.id === "ideation") return <IdeationForm ticket={ticket} />;
   if (col.role === "collect-input" && col.id === "transcript") return <TranscriptForm ticket={ticket} />;
+  if (col.role === "collect-input") return <CaptureForm ticket={ticket} columnName={col.name} variable={outputVarName(col)} />;
   if (col.role === "review" || col.role === "approve") return <ReviewForm ticket={ticket} />;
   if (col.id === "fry") return <GrillRoom ticket={ticket} />;
   if (col.id === "write-plan") return <PlanForm ticket={ticket} />;
@@ -238,6 +239,38 @@ function DoneForm({ ticket }: { ticket: Ticket }) {
           Continue in {next.name}
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+function CaptureForm({ ticket, columnName, variable }: { ticket: Ticket; columnName: string; variable: string }) {
+  const updateTicket = useBoardStore((s) => s.updateTicket);
+  const runTicket = useBoardStore((s) => s.runTicket);
+  const [notes, setNotes] = useState(ticket.ideationNotes || ticket.description);
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-muted">
+        No agent on this step. Type the input; Save publishes it as{" "}
+        <span className="font-mono text-fg">{`{{${variable || "prev"}}}`}</span> for later stages.
+      </p>
+      <Textarea
+        className="min-h-40"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder={`${columnName} notes…`}
+      />
+      <Button
+        variant="primary"
+        size="md"
+        className="w-full"
+        disabled={!notes.trim()}
+        onClick={() => {
+          updateTicket(ticket.id, { ideationNotes: notes, description: ticket.description || notes });
+          void runTicket(ticket.id);
+        }}
+      >
+        Save & continue
+      </Button>
     </div>
   );
 }

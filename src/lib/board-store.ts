@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Flow, GrillQuestion, GrillRound, TeamConfig, TeamDoc, TeamMember, Ticket, WorkflowColumn } from "./types";
+import type { Flow, GrillQuestion, GrillRound, TeamConfig, TeamDoc, TeamMember, TeamPrompt, Ticket, WorkflowColumn } from "./types";
 import {
   BLOCKED_COLUMN_ID,
   cloneColumns,
@@ -21,6 +21,7 @@ import {
   writeFlowColumns,
 } from "./team-config";
 import { harvestVars } from "./flow-context";
+import { promptIdForColumn, resolveStagePrompt, stampPromptRefs } from "./prompts";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
 import { runDiscoveryAgent } from "./discovery-agent";
@@ -56,6 +57,9 @@ type BoardState = {
   setActiveMember: (id: string) => void;
   upsertDoc: (doc: TeamDoc) => void;
   removeDoc: (id: string) => void;
+  addPrompt: () => string;
+  updatePrompt: (id: string, patch: Partial<TeamPrompt>) => void;
+  removePrompt: (id: string) => void;
   patchConfig: (patch: Partial<TeamConfig>) => void;
   updateColumn: (id: string, patch: Partial<WorkflowColumn>) => void;
   moveColumn: (id: string, dir: -1 | 1) => void;
@@ -384,15 +388,16 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const latest = get().tickets.find((t) => t.id === id);
       if (!latest) return;
       const liveCol = columnById(latest.columnId, get().config.columns);
+      const resolved = resolveStagePrompt(liveCol, get().config.prompts, get().config.docs);
       const result = await runDiscoveryAgent({
         data: {
           ticket: latest,
           columnId: latest.columnId,
-          promptTemplate: liveCol?.promptTemplate,
-          promptId: liveCol?.promptId,
+          promptTemplate: resolved.body,
+          promptId: resolved.studioPromptId,
           execution: get().config.execution,
           stepAgent: liveCol?.agent,
-          docs: get().config.docs,
+          docs: resolved.docs,
         },
       });
 
@@ -501,16 +506,17 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const latest = get().tickets.find((t) => t.id === id);
       if (!latest) return;
       const liveCol = columnById(FRY_COLUMN_ID, get().config.columns);
+      const resolved = resolveStagePrompt(liveCol, get().config.prompts, get().config.docs);
       const result = await runDiscoveryAgent({
         data: {
           ticket: latest,
           columnId: FRY_COLUMN_ID,
           grillSubmit: true,
-          promptTemplate: liveCol?.promptTemplate,
-          promptId: liveCol?.promptId,
+          promptTemplate: resolved.body,
+          promptId: resolved.studioPromptId,
           execution: get().config.execution,
           stepAgent: liveCol?.agent,
-          docs: get().config.docs,
+          docs: resolved.docs,
         },
       });
       if (!result.ok) {
@@ -611,6 +617,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   addColumn: () => {
     const id = `custom-${uid("col")}`;
+    const promptId = promptIdForColumn(id);
     const col: WorkflowColumn = {
       id,
       name: "New stage",
@@ -621,13 +628,22 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       custom: true,
       agent: "inherit",
       outputKey: id.replace(/[^a-zA-Z0-9]+/g, "_"),
+      promptRef: promptId,
       promptTemplate:
         "Produce a concise operator-facing result for this stage.\n\nPrevious:\n{{prev}}\n\n{{context}}",
+    };
+    const prompt: TeamPrompt = {
+      id: promptId,
+      name: "Custom",
+      body: col.promptTemplate || "",
+      skillIds: [],
     };
     const cols = [...get().config.columns];
     const doneAt = cols.findIndex((c) => c.id === DONE_COLUMN_ID);
     cols.splice(doneAt < 0 ? cols.length : doneAt, 0, col);
-    set({ config: writeFlowColumns(get().config, cols) });
+    set({
+      config: writeFlowColumns({ ...get().config, prompts: [...(get().config.prompts ?? []), prompt] }, cols),
+    });
     get().persist();
   },
 
@@ -729,6 +745,36 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   removeDoc: (id) => {
     set({ config: { ...get().config, docs: get().config.docs.filter((d) => d.id !== id) } });
+    get().persist();
+  },
+
+  addPrompt: () => {
+    const id = `prompt-${uid()}`;
+    const prompt: TeamPrompt = {
+      id,
+      name: "New prompt",
+      body: "Produce a concise operator-facing result.\n\nPrevious:\n{{prev}}\n\n{{context}}",
+      skillIds: [],
+    };
+    set({ config: { ...get().config, prompts: [...(get().config.prompts ?? []), prompt] } });
+    get().persist();
+    return id;
+  },
+
+  updatePrompt: (id, patch) => {
+    const prompts = (get().config.prompts ?? []).map((p) => (p.id === id ? { ...p, ...patch, id: p.id } : p));
+    set({ config: { ...get().config, prompts } });
+    get().persist();
+  },
+
+  removePrompt: (id) => {
+    const columns = get().config.columns.map((c) => (c.promptRef === id ? { ...c, promptRef: undefined } : c));
+    set({
+      config: writeFlowColumns(
+        { ...get().config, prompts: (get().config.prompts ?? []).filter((p) => p.id !== id) },
+        columns,
+      ),
+    });
     get().persist();
   },
 
@@ -839,7 +885,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       id,
       name: "New flow",
       description: "Custom pipeline. Stages publish {{variables}} for later steps.",
-      columns: cloneColumns(),
+      columns: stampPromptRefs(cloneColumns()),
       autoAdvance: true,
       autoRun: true,
     };

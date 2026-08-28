@@ -144,6 +144,8 @@ export type WorkflowColumn = {
   agent?: StepAgent;
   /** Variable name this stage publishes, e.g. spec — usable later as {{spec}}. */
   outputKey?: string;
+  /** Library prompt this stage runs. */
+  promptRef?: string;
   enabled: boolean;
   locked?: boolean;
   custom?: boolean;
@@ -160,6 +162,15 @@ export type Flow = {
   autoRun: boolean;
   /** When this flow hits Done, continue the ticket on another flow (vars travel). */
   continueInFlowId?: string;
+};
+
+export type TeamPrompt = {
+  id: string;
+  name: string;
+  body: string;
+  studioPromptId?: string;
+  /** Skills from the library pasted into this prompt on run. */
+  skillIds: string[];
 };
 
 export type TeamDoc = {
@@ -188,6 +199,7 @@ export type TeamConfig = {
   flows: Flow[];
   activeFlowId: string;
   docs: TeamDoc[];
+  prompts: TeamPrompt[];
   theme: ThemeId;
   density: DensityId;
   pipelineLayout: PipelineLayout;

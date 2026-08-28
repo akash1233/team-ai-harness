@@ -13,6 +13,7 @@ import {
   WRITE_PLAN_COLUMN_ID,
 } from "./columns";
 import { mergePricing } from "./pricing";
+import { createDefaultPrompts, mergePrompts, stampPromptRefs } from "./prompts";
 import { legacyDefaultAgent } from "./agents";
 import { DEFAULT_DOCS } from "./grill-skill";
 import type { ExecutionConfig, Flow, TeamConfig, TeamDoc, TeamMember, WorkflowColumn } from "./types";
@@ -27,7 +28,7 @@ export const DEFAULT_MEMBERS: TeamMember[] = [
 ];
 
 export function createDefaultColumns(): WorkflowColumn[] {
-  return cloneColumns();
+  return stampPromptRefs(cloneColumns());
 }
 
 export function createDiscoveryFlow(): Flow {
@@ -35,7 +36,7 @@ export function createDiscoveryFlow(): Flow {
     id: DISCOVERY_FLOW_ID,
     name: "Discovery",
     description: "Brief → agenda (Cursor) → notes → spec (Studio) → Grill Me → backlog (Cursor) → Jira.",
-    columns: cloneColumns(),
+    columns: stampPromptRefs(cloneColumns()),
     autoAdvance: true,
     autoRun: true,
     continueInFlowId: QUICK_SPEC_FLOW_ID,
@@ -47,7 +48,7 @@ export function createQuickSpecFlow(): Flow {
     id: QUICK_SPEC_FLOW_ID,
     name: "Quick spec",
     description: "Skip agenda and Slack. Brief → spec (Studio) → grill → backlog (Cursor) → Jira.",
-    columns: cloneColumns([
+    columns: stampPromptRefs(cloneColumns([
       IDEATION_COLUMN_ID,
       SYNTHESIZE_COLUMN_ID,
       FRY_COLUMN_ID,
@@ -57,7 +58,7 @@ export function createQuickSpecFlow(): Flow {
       FILE_JIRA_COLUMN_ID,
       DONE_COLUMN_ID,
       BLOCKED_COLUMN_ID,
-    ]),
+    ])),
     autoAdvance: true,
     autoRun: true,
   };
@@ -112,6 +113,7 @@ export function createDefaultTeam(): TeamConfig {
     flows,
     activeFlowId: active.id,
     docs: DEFAULT_DOCS.map((d) => ({ ...d })),
+    prompts: createDefaultPrompts(active.columns),
     theme: "paper",
     density: "comfortable",
     pipelineLayout: "horizontal",
@@ -131,6 +133,7 @@ export function mergeColumns(saved?: WorkflowColumn[]): WorkflowColumn[] {
       ...col,
       agent: col.agent ?? base?.agent ?? "inherit",
       outputKey: col.outputKey ?? base?.outputKey,
+      promptRef: col.promptRef ?? base?.promptRef,
     };
   });
 }
@@ -233,6 +236,7 @@ export function mergeTeamConfig(saved?: Partial<TeamConfig>): TeamConfig {
     ...saved,
     members: saved.members?.length ? saved.members : d.members,
     docs: mergeDocs(saved.docs),
+    prompts: mergePrompts(saved.prompts, saved.columns ?? d.columns),
     execution: mergeExecution(saved.execution),
     flows,
     activeFlowId,

@@ -32,7 +32,9 @@ The **Settings** gear in the header is the control plane. Nothing about the pipe
 | --- | --- |
 | **Team** | Name, Jira prefix, Slack channel, **people** (name / handle / role), labels |
 | **Flows** | Multiple pipelines. Add, duplicate, delete. Auto-advance and auto-run |
-| **Pipeline** | Stage order, labels, role, **agent per stage**, output variable |
+| **Pipeline** | Ordered stages: name, what it does, who runs it, **which prompt**, variable it publishes |
+| **Prompts** | Prompt library. Add prompt, paste skills into the body, or attach Skills. Stages pick one |
+| **Skills** | Skill/doc library. Prompts check which skills to append on run |
 | **Prompts** | Prompt templates (`{{spec}}`, `{{grill}}`, …) and per-stage Studio prompt IDs |
 | **Docs** | Grill Me skill + notes the grill reads |
 | **Execution** | Default agent, Cursor/Claude local vs remote, Studio/CIS, **Test Cursor / Test Claude**, MCP list, **token pricing** |

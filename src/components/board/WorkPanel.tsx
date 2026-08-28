@@ -6,6 +6,7 @@ import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { columnById } from "@/lib/columns";
 import { mentionedKeys, outputVarName } from "@/lib/flow-context";
+import { resolveStagePrompt } from "@/lib/prompts";
 import { channelLabel, formatSpend } from "@/lib/format";
 import { resolveStep } from "@/lib/agents";
 import { formatGrillRecord } from "@/lib/grill";
@@ -66,10 +67,11 @@ export function WorkPanel() {
 }
 
 function FlowVars({ ticket }: { ticket: Ticket }) {
-  const columns = useBoardStore((s) => s.config.columns);
-  const col = columnById(ticket.columnId, columns);
+  const config = useBoardStore((s) => s.config);
+  const col = columnById(ticket.columnId, config.columns);
+  const resolved = resolveStagePrompt(col, config.prompts, config.docs);
   const writes = outputVarName(col);
-  const uses = mentionedKeys(col?.promptTemplate).filter((k) => !k.startsWith("ticket."));
+  const uses = mentionedKeys(resolved.body).filter((k) => !k.startsWith("ticket."));
   const filled = Object.entries(ticket.vars ?? {}).filter(([, v]) => v.trim());
   if (!writes && uses.length === 0 && filled.length === 0) return null;
   return (
@@ -310,11 +312,12 @@ function RunForm({ ticket }: { ticket: Ticket }) {
   const advance = useBoardStore((s) => s.advance);
   const config = useBoardStore((s) => s.config);
   const col = columnById(ticket.columnId, config.columns);
+  const resolved = resolveStagePrompt(col, config.prompts, config.docs);
   const busy = ticket.status === "executing";
   const hasOutput = Boolean(ticket.outputs[ticket.columnId]);
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted">{col?.promptTemplate}</p>
+      <p className="text-sm text-muted">{resolved.body.slice(0, 280) || col?.promptTemplate}</p>
       {hasOutput ? (
         <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
           {ticket.outputs[ticket.columnId]}

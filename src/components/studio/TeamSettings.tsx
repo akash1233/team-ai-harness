@@ -12,8 +12,17 @@ import { Field, Code } from "@/components/studio/settings/field";
 import { PricingFields } from "@/components/studio/settings/PricingFields";
 import { mergePricing } from "@/lib/pricing";
 
-const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Docs", "Execution", "Look"] as const;
+const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Skills", "Execution", "Look"] as const;
 type Tab = (typeof TABS)[number];
+
+const ROLE_LABEL: Record<ColumnRole, string> = {
+  "collect-input": "Team types this",
+  prompt: "Agent runs",
+  review: "Human review (skipped if auto-run)",
+  plan: "Agent writes plan",
+  approve: "Sign-off gate",
+  terminal: "End of this flow",
+};
 
 const ROLES: ColumnRole[] = ["collect-input", "prompt", "review", "plan", "approve", "terminal"];
 const STEP_AGENTS: { id: StepAgent; label: string }[] = [
@@ -33,6 +42,12 @@ const KIND_LABEL: Record<AgentKind, string> = {
 export function TeamSettings() {
   const toggleSettings = useBoardStore((s) => s.toggleSettings);
   const [tab, setTab] = useState<Tab>("Team");
+  const [focusPromptId, setFocusPromptId] = useState<string | null>(null);
+
+  function openPrompt(id: string) {
+    setFocusPromptId(id);
+    setTab("Prompts");
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex items-stretch justify-center bg-fg/30 p-0 md:items-center md:p-6">
@@ -69,9 +84,9 @@ export function TeamSettings() {
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {tab === "Team" ? <TeamTab /> : null}
           {tab === "Flows" ? <FlowsTab /> : null}
-          {tab === "Pipeline" ? <PipelineTab /> : null}
-          {tab === "Prompts" ? <PromptsTab /> : null}
-          {tab === "Docs" ? <DocsTab /> : null}
+          {tab === "Pipeline" ? <PipelineTab onEditPrompt={openPrompt} /> : null}
+          {tab === "Prompts" ? <PromptsTab focusId={focusPromptId} onFocus={setFocusPromptId} /> : null}
+          {tab === "Skills" ? <DocsTab /> : null}
           {tab === "Execution" ? <ExecutionTab /> : null}
           {tab === "Look" ? <LookTab /> : null}
         </div>
@@ -321,59 +336,110 @@ function FlowsTab() {
   );
 }
 
-function PipelineTab() {
+function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
   const columns = useBoardStore((s) => s.config.columns);
+  const prompts = useBoardStore((s) => s.config.prompts) ?? [];
   const updateColumn = useBoardStore((s) => s.updateColumn);
   const moveColumn = useBoardStore((s) => s.moveColumn);
   const addColumn = useBoardStore((s) => s.addColumn);
   const removeColumn = useBoardStore((s) => s.removeColumn);
+  const addPrompt = useBoardStore((s) => s.addPrompt);
 
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        Stages for the active flow. Each runnable stage publishes a variable the next step can read. Auto-run skips reviews until a human gate.
+        Order is the pipeline. Each row is one stage: what the team sees, whether an agent runs, which prompt it uses, and the variable it publishes for later stages.
       </p>
       <ul className="flex flex-col gap-2">
         {columns.map((col, i) => (
           <li key={col.id} className="rounded-md border border-border bg-elevated p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-micro text-subtle">{String(i + 1).padStart(2, "0")}</span>
-              <Input
-                className="h-11 min-w-32 flex-1"
-                value={col.label}
-                onChange={(e) => updateColumn(col.id, { label: e.target.value, name: e.target.value || col.name })}
-              />
-              <select
-                className="h-11 rounded-md border border-border bg-inset px-2 text-sm"
-                value={col.role}
-                disabled={col.locked}
-                onChange={(e) => updateColumn(col.id, { role: e.target.value as ColumnRole })}
-              >
-                {ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="h-11 rounded-md border border-border bg-inset px-2 text-sm"
-                value={col.agent ?? "inherit"}
-                onChange={(e) => updateColumn(col.id, { agent: e.target.value as StepAgent })}
-                aria-label={`${col.label} agent`}
-              >
-                {STEP_AGENTS.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label}
-                  </option>
-                ))}
-              </select>
-              <Input
-                className="h-11 w-28"
-                placeholder="{{var}}"
-                value={col.outputKey ?? ""}
-                onChange={(e) => updateColumn(col.id, { outputKey: e.target.value.trim() })}
-                aria-label={`${col.label} variable`}
-              />
+            <div className="flex flex-wrap items-end gap-2">
+              <span className="mb-3 font-mono text-micro text-subtle">{String(i + 1).padStart(2, "0")}</span>
+              <label className="flex min-w-32 flex-1 flex-col gap-1">
+                <span className="text-micro text-subtle">Stage name</span>
+                <Input
+                  className="h-11"
+                  value={col.label}
+                  onChange={(e) => updateColumn(col.id, { label: e.target.value, name: e.target.value || col.name })}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-micro text-subtle">What this stage does</span>
+                <select
+                  className="h-11 rounded-md border border-border bg-inset px-2 text-sm"
+                  value={col.role}
+                  disabled={col.locked}
+                  onChange={(e) => updateColumn(col.id, { role: e.target.value as ColumnRole })}
+                  title={ROLE_LABEL[col.role]}
+                >
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABEL[r]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-micro text-subtle">Who runs it</span>
+                <select
+                  className="h-11 rounded-md border border-border bg-inset px-2 text-sm"
+                  value={col.agent ?? "inherit"}
+                  onChange={(e) => updateColumn(col.id, { agent: e.target.value as StepAgent })}
+                >
+                  {STEP_AGENTS.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {col.role === "prompt" || col.role === "plan" || col.role === "collect-input" ? (
+                <label className="flex min-w-40 flex-1 flex-col gap-1">
+                  <span className="text-micro text-subtle">Prompt</span>
+                  <div className="flex gap-1">
+                    <select
+                      className="h-11 min-w-0 flex-1 rounded-md border border-border bg-inset px-2 text-sm"
+                      value={col.promptRef ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "__new__") {
+                          const id = addPrompt();
+                          updateColumn(col.id, { promptRef: id });
+                          onEditPrompt(id);
+                          return;
+                        }
+                        updateColumn(col.id, { promptRef: v || undefined });
+                      }}
+                    >
+                      <option value="">None</option>
+                      {prompts.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                      <option value="__new__">+ New prompt…</option>
+                    </select>
+                    {col.promptRef ? (
+                      <button
+                        type="button"
+                        className="h-11 shrink-0 rounded-md border border-border px-3 text-2xs"
+                        onClick={() => onEditPrompt(col.promptRef!)}
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                  </div>
+                </label>
+              ) : null}
+              <label className="flex w-28 flex-col gap-1">
+                <span className="text-micro text-subtle">Publishes as</span>
+                <Input
+                  className="h-11 font-mono"
+                  placeholder="spec"
+                  value={col.outputKey ?? ""}
+                  onChange={(e) => updateColumn(col.id, { outputKey: e.target.value.trim() })}
+                />
+              </label>
               <label className="flex h-11 items-center gap-2 px-2 text-sm">
                 <input
                   type="checkbox"
@@ -411,6 +477,7 @@ function PipelineTab() {
                 </button>
               ) : null}
             </div>
+            <p className="mt-2 text-2xs text-muted">{ROLE_LABEL[col.role]}{col.outputKey ? ` · later stages read {{${col.outputKey}}}` : ""}</p>
           </li>
         ))}
       </ul>
@@ -422,52 +489,129 @@ function PipelineTab() {
   );
 }
 
-function PromptsTab() {
+function PromptsTab({ focusId, onFocus }: { focusId: string | null; onFocus: (id: string) => void }) {
   const columns = useBoardStore((s) => s.config.columns);
+  const prompts = useBoardStore((s) => s.config.prompts) ?? [];
+  const docs = useBoardStore((s) => s.config.docs);
+  const addPrompt = useBoardStore((s) => s.addPrompt);
+  const updatePrompt = useBoardStore((s) => s.updatePrompt);
+  const removePrompt = useBoardStore((s) => s.removePrompt);
   const updateColumn = useBoardStore((s) => s.updateColumn);
-  const promptable = columns.filter((c) => c.role === "prompt" || c.role === "plan" || c.role === "collect-input");
-  const [id, setId] = useState(promptable[0]?.id ?? "");
-  const col = columns.find((c) => c.id === id) ?? promptable[0];
+  const [id, setId] = useState(focusId || prompts[0]?.id || "");
+  const prompt = prompts.find((p) => p.id === (focusId || id)) ?? prompts.find((p) => p.id === id) ?? prompts[0];
+
+  function select(next: string) {
+    setId(next);
+    onFocus(next);
+  }
+
+  function create() {
+    const next = addPrompt();
+    select(next);
+  }
+
+  const usedBy = columns.filter((c) => c.promptRef === prompt?.id);
 
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        Templates go to the agent on Run. Use {"{{brief}}"}, {"{{spec}}"}, {"{{grill}}"}, {"{{plan}}"}, {"{{transcript}}"}, {"{{prev}}"}, {"{{ticket.title}}"} — filled from earlier stages on this ticket.
+        A prompt is what the agent receives. Paste a skill into the body, or attach skills from the Skills tab — they are appended on run. Pipeline stages pick a prompt from this list.
       </p>
       <div className="flex flex-wrap gap-1">
-        {promptable.map((c) => (
+        {prompts.map((p) => (
           <button
-            key={c.id}
+            key={p.id}
             type="button"
-            onClick={() => setId(c.id)}
+            onClick={() => select(p.id)}
             className={cn(
               "h-11 rounded-md px-3 text-sm",
-              c.id === col?.id ? "bg-accent text-accent-fg" : "bg-inset text-muted",
+              p.id === prompt?.id ? "bg-accent text-accent-fg" : "bg-inset text-muted",
             )}
           >
-            {c.label}
+            {p.name}
           </button>
         ))}
+        <button type="button" onClick={create} className="inline-flex h-11 items-center gap-1 rounded-md border border-border px-3 text-sm">
+          <Plus className="size-4" />
+          Add prompt
+        </button>
       </div>
-      {col ? (
+      {prompt ? (
         <>
-          <Field label={`${col.name} prompt`}>
+          <Field label="Prompt name">
+            <Input value={prompt.name} onChange={(e) => updatePrompt(prompt.id, { name: e.target.value })} />
+          </Field>
+          <Field label="Prompt body (skills can be pasted here)">
             <Textarea
               className="min-h-52 font-mono text-2xs"
-              value={col.promptTemplate ?? ""}
-              onChange={(e) => updateColumn(col.id, { promptTemplate: e.target.value })}
+              value={prompt.body}
+              onChange={(e) => {
+                updatePrompt(prompt.id, { body: e.target.value });
+                for (const c of usedBy) updateColumn(c.id, { promptTemplate: e.target.value });
+              }}
             />
           </Field>
+          <fieldset className="rounded-md border border-border p-3">
+            <legend className="px-1 text-sm font-medium">Skills to append on run</legend>
+            <p className="mb-2 text-2xs text-muted">Same library as the Skills tab. Check ones this prompt should call.</p>
+            {docs.length ? (
+              <ul className="flex flex-col gap-1">
+                {docs.map((d) => {
+                  const on = (prompt.skillIds ?? []).includes(d.id);
+                  return (
+                    <li key={d.id}>
+                      <label className="flex min-h-11 items-center gap-3 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={(e) => {
+                            const current = prompt.skillIds ?? [];
+                            const skillIds = e.target.checked
+                              ? [...current, d.id]
+                              : current.filter((x) => x !== d.id);
+                            updatePrompt(prompt.id, { skillIds });
+                          }}
+                        />
+                        <span>{d.title}</span>
+                        <span className="text-2xs text-muted">{d.kind}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-2xs text-muted">No skills yet. Add them on the Skills tab, or paste into the prompt body.</p>
+            )}
+          </fieldset>
           <Field label="GenAI Studio prompt ID (optional override)">
             <Input
               className="font-mono"
-              value={col.promptId ?? ""}
+              value={prompt.studioPromptId ?? ""}
               placeholder="Uses the workspace default"
-              onChange={(e) => updateColumn(col.id, { promptId: e.target.value })}
+              onChange={(e) => updatePrompt(prompt.id, { studioPromptId: e.target.value })}
             />
           </Field>
+          <p className="text-2xs text-muted">
+            Used by: {usedBy.length ? usedBy.map((c) => c.label).join(", ") : "no pipeline stage yet — pick this prompt on Pipeline."}
+          </p>
+          {!usedBy.length ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="self-start text-danger"
+              onClick={() => {
+                removePrompt(prompt.id);
+                const next = prompts.find((p) => p.id !== prompt.id);
+                if (next) select(next.id);
+              }}
+            >
+              Delete prompt
+            </Button>
+          ) : null}
         </>
-      ) : null}
+      ) : (
+        <p className="text-sm text-muted">No prompts. Add one, then attach it to a pipeline stage.</p>
+      )}
     </div>
   );
 }
@@ -481,7 +625,7 @@ function DocsTab() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        Grill Me reads these documents with the Synthesize spec. Put the Cursor or Claude skill here so the team is grilling one contract.
+        Grill Me and any prompt can read these. Attach a skill to a prompt on the Prompts tab, or paste the skill body into the prompt itself.
       </p>
       {docs.map((doc) => (
         <section key={doc.id} className="rounded-md border border-border p-3">

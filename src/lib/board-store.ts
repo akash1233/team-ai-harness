@@ -10,6 +10,7 @@ import {
   IDEATION_COLUMN_ID,
   nextColumnId,
   parkOrphanTickets,
+  resolveActiveStage,
   startColumnId,
   TRANSCRIPT_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
@@ -157,7 +158,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
             ),
             config,
             selectedId: parsed.selectedId ?? null,
-            activeStageId: parsed.activeStageId ?? FRY_COLUMN_ID,
+            activeStageId: resolveActiveStage(config.columns, parsed.activeStageId),
             activeMemberId: parsed.activeMemberId ?? config.members[0]?.id ?? "m-maya",
             hydrated: true,
           });
@@ -344,9 +345,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   runColumn: async (columnId) => {
     const col = columnById(columnId, get().config.columns);
     if (!col) return;
-    const ticket =
+    let ticket =
       get().tickets.find((t) => t.id === get().selectedId && t.columnId === columnId) ??
       get().tickets.find((t) => t.columnId === columnId && t.status !== "executing");
+    if (!ticket) {
+      const id = get().addTicket({ title: col.name, description: "" });
+      get().moveTicket(id, columnId);
+      ticket = get().tickets.find((t) => t.id === id);
+    }
     if (!ticket) return;
     if (col.role === "review" || col.role === "approve") {
       get().approve(ticket.id);
@@ -765,6 +771,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     set({
       config: writeFlowColumns(get().config, remaining),
       tickets: get().tickets.map((t) => (t.columnId === id ? { ...t, columnId: start } : t)),
+      activeStageId: resolveActiveStage(remaining, get().activeStageId === id ? start : get().activeStageId),
     });
     get().persist();
   },
@@ -1023,11 +1030,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   setActiveFlow: (id) => {
     const config = applyActiveFlow(get().config, id);
-    const start = config.columns.find((c) => c.enabled)?.id ?? config.columns[0]?.id;
     set({
       config,
       selectedId: null,
-      activeStageId: start ?? get().activeStageId,
+      activeStageId: resolveActiveStage(config.columns),
     });
     get().persist();
   },

@@ -26,9 +26,17 @@ export function Studio() {
   const setActiveFlow = useBoardStore((s) => s.setActiveFlow);
   const [newOpen, setNewOpen] = useState(false);
 
+  const setActiveStage = useBoardStore((s) => s.setActiveStage);
+  const activeStageId = useBoardStore((s) => s.activeStageId);
+
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    const ids = config.columns.map((c) => c.id);
+    if (ids.length && !ids.includes(activeStageId)) setActiveStage(ids[0]!);
+  }, [config.columns, activeStageId, setActiveStage]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = config.theme;
@@ -37,7 +45,6 @@ export function Studio() {
 
   const spend = tickets.reduce((n, t) => n + t.spend, 0);
   const selected = tickets.some((t) => t.id === selectedId);
-  const activeStageId = useBoardStore((s) => s.activeStageId);
   const step = resolveStep(columnById(activeStageId, config.columns), config.execution);
 
   return (

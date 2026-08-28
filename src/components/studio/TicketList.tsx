@@ -23,7 +23,6 @@ export function TicketList() {
     (col.role === "prompt" || col.role === "plan" || col.role === "review" || col.role === "approve");
   const busy = inStage.some((t) => t.status === "executing");
   const step = col ? resolveStep(col, config.execution) : null;
-  const demo = config.execution?.demoFallbacks;
   const stageLog = inFlow
     .flatMap((t) => t.agentResponses.filter((r) => r.columnId === activeStageId).map((r) => ({ t, r })))
     .sort((a, b) => (a.r.at < b.r.at ? 1 : -1))
@@ -34,29 +33,23 @@ export function TicketList() {
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4 md:px-8">
         <div className="min-w-0">
           <p className="text-micro uppercase tracking-widest text-subtle">
-            {col?.role.replace("-", " ") ?? "stage"}
-            {step && (col?.role === "prompt" || col?.role === "plan") ? ` · ${step.label}` : ""}
-            {!col?.enabled ? " · off" : ""}
-            {demo ? " · demo fallback on" : ""}
+            {col ? `${String(config.columns.findIndex((c) => c.id === col.id) + 1).padStart(2, "0")} · ${col.role.replace("-", " ")}` : "Pick a stage"}
+            {step && col && (col.role === "prompt" || col.role === "plan") ? ` · ${step.label}` : ""}
           </p>
-          <h1 className="font-serif text-3xl font-medium tracking-tight md:text-4xl">{col?.name ?? "Stage"}</h1>
-          {col?.promptTemplate ? (
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted line-clamp-2">{col.promptTemplate}</p>
-          ) : (
-            <p className="mt-2 max-w-xl text-sm text-muted">
-              {inStage.length} in this stage. Drag onto another stage in the rail to move.
-            </p>
-          )}
+          <h1 className="font-serif text-3xl font-medium tracking-tight md:text-4xl">{col?.label || col?.name || "Stage"}</h1>
+          <p className="mt-2 max-w-xl text-sm text-muted">
+            {inStage.length} in this stage. Run from here — Terminal opens and the last agent reply is the output.
+          </p>
         </div>
         {runnable ? (
           <Button
             variant="primary"
             size="md"
-            disabled={busy || inStage.length === 0}
-            onClick={() => runColumn(activeStageId)}
+            disabled={busy}
+            onClick={() => void runColumn(activeStageId)}
           >
             <Play className="size-4 fill-current" />
-            Run {step?.label ?? "agent"}
+            {busy ? "Running…" : inStage.length === 0 ? `Start · ${step?.label ?? "agent"}` : `Run ${step?.label ?? "agent"}`}
           </Button>
         ) : null}
       </div>
@@ -65,7 +58,7 @@ export function TicketList() {
         {inStage.length === 0 ? (
           <div className="flex min-h-32 items-end rounded-lg border border-dashed border-border px-6 py-8">
             <p className="max-w-sm text-sm text-muted">
-              Nothing waiting in {col?.label ?? "this stage"}. The log below still shows what ran here.
+              Nothing in this stage yet. <strong className="font-medium text-fg">Start</strong> runs Cursor/Claude with this stage’s prompt and creates a ticket.
             </p>
           </div>
         ) : (

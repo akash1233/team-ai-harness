@@ -202,6 +202,11 @@ export function startColumnId(columns: WorkflowColumn[]): string {
   );
 }
 
+export function resolveActiveStage(columns: WorkflowColumn[], current?: string): string {
+  if (current && columns.some((c) => c.id === current)) return current;
+  return startColumnId(columns);
+}
+
 export function parkOrphanTickets<T extends { columnId: string }>(tickets: T[], columns: WorkflowColumn[]): T[] {
   const ids = new Set(columns.map((c) => c.id));
   const start = startColumnId(columns);

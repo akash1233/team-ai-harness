@@ -346,26 +346,12 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
   const addColumn = useBoardStore((s) => s.addColumn);
   const removeColumn = useBoardStore((s) => s.removeColumn);
   const addPrompt = useBoardStore((s) => s.addPrompt);
-  const testStage = useBoardStore((s) => s.testStage);
-  const [testing, setTesting] = useState<string | null>(null);
-  const [stageInput, setStageInput] = useState<Record<string, string>>({});
-  const [stageOut, setStageOut] = useState<Record<string, { ok: boolean; text: string; error?: string; variable?: string }>>({});
-
-  async function runTest(id: string) {
-    setTesting(id);
-    try {
-      const r = await testStage(id, stageInput[id]);
-      setStageOut((prev) => ({ ...prev, [id]: r }));
-    } finally {
-      setTesting(null);
-    }
-  }
 
   return (
     <div className="flex flex-col gap-3">
       <div className="rounded-md border border-border bg-inset px-3 py-2 text-sm text-muted">
         <p>
-          Each stage runs its prompt on Cursor/Claude and saves the <strong className="font-medium text-fg">answer</strong> as the variable. The next stage can read it (e.g. <span className="font-mono">{"{{agenda}}"}</span>). Optional input is extra context for this run only.
+          This tab only <strong className="font-medium text-fg">designs</strong> the flow: name, agent, prompt, variable. Close settings and run it on the board — that is where Terminal opens and the last agent reply becomes the stage output.
         </p>
       </div>
       <ul className="flex flex-col gap-2">
@@ -510,39 +496,6 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                 " · set a variable name so later stages can use this output"
               )}
             </p>
-            {col.role === "prompt" || col.role === "plan" ? (
-              <div className="mt-3 flex flex-col gap-2">
-                <label className="block">
-                  <span className="mb-1 block text-2xs text-muted">Optional input for this run ({"{{input}}"})</span>
-                  <Textarea
-                    value={stageInput[col.id] ?? ""}
-                    onChange={(e) => setStageInput((prev) => ({ ...prev, [col.id]: e.target.value }))}
-                    placeholder="Leave blank to run the prompt as-is."
-                  />
-                </label>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="w-fit"
-                  disabled={testing !== null}
-                  onClick={() => void runTest(col.id)}
-                >
-                  {testing === col.id ? "Running…" : "Run this stage"}
-                </Button>
-                {stageOut[col.id] ? (
-                  <pre
-                    className={cn(
-                      "max-h-64 overflow-auto whitespace-pre-wrap rounded-md border p-3 font-sans text-sm",
-                      stageOut[col.id]!.ok ? "border-border bg-inset text-fg" : "border-danger bg-danger/5 text-danger",
-                    )}
-                  >
-                    {stageOut[col.id]!.ok
-                      ? `${stageOut[col.id]!.variable ? `{{${stageOut[col.id]!.variable}}}\n\n` : ""}${stageOut[col.id]!.text || "(empty)"}`
-                      : stageOut[col.id]!.error || stageOut[col.id]!.text || "Failed"}
-                  </pre>
-                ) : null}
-              </div>
-            ) : null}
           </li>
         ))}
       </ul>

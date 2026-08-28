@@ -88,29 +88,19 @@ export function PipelineBoard() {
                     variant={failed ? "secondary" : "primary"}
                     size="md"
                     className="mt-3 w-full"
-                    disabled={busy || here.length === 0}
-                    title={
-                      here.length === 0
-                        ? inFlow.length === 0
-                          ? "Create a ticket first (New ticket). Tickets start in stage 01."
-                          : "No tickets in this column. Drag one here, or Test this stage in Settings → Pipeline."
-                        : `Run ${step.label} on tickets in this stage`
-                    }
+                    disabled={busy}
+                    title={`Run ${step.label} — creates a ticket if this column is empty`}
                     onClick={() => {
                       setActiveStage(col.id);
                       void runColumn(col.id);
                     }}
                   >
                     <Play className="size-3.5 fill-current" />
-                    {busy ? "Running…" : `Run ${step.label}`}
+                    {busy ? "Running…" : here.length === 0 ? `Start · ${step.label}` : `Run ${step.label}`}
                   </Button>
                 ) : null}
                 {runnable && here.length === 0 ? (
-                  <p className="mt-2 text-2xs text-muted">
-                    {inFlow.length === 0
-                      ? "Create a ticket, then Run. Tickets start in stage 01."
-                      : "Empty — drag a ticket here, or use Settings → Pipeline → Test this stage."}
-                  </p>
+                  <p className="mt-2 text-2xs text-muted">Start here. Terminal opens; the last reply is the stage output.</p>
                 ) : null}
               </header>
               <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">

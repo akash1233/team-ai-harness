@@ -81,7 +81,7 @@ Do not send Slack. Do not create Jira issues. Agenda document only.`,
     role: "prompt",
     rail: "run",
     enabled: true,
-    agent: "cursor",
+    agent: "studio",
     promptTemplate: `Turn ideation, the Jira issue, and the meeting transcript into a spec.
 Cover: problem, solution, user stories, implementation decisions, testing decisions, out of scope.
 Do not interview. Do not create Jira issues.
@@ -134,7 +134,7 @@ Prior grill:
     role: "plan",
     rail: "gate",
     enabled: true,
-    agent: "claude",
+    agent: "cursor",
     promptTemplate: `Turn the Jira problem, synthesis, and Fryme output into a Jira backlog plan: epics and stories only. No implementation.
 Honor Grill Me answers as binding decisions.
 

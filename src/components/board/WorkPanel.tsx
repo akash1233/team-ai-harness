@@ -112,7 +112,26 @@ function StepBody({ ticket }: { ticket: Ticket }) {
   if (col.id === "file-jira") return <JiraForm ticket={ticket} />;
   if (col.role === "prompt" || col.role === "plan") return <RunForm ticket={ticket} />;
   if (col.id === "done") {
+    return <DoneForm ticket={ticket} />;
+  }
+  if (col.id === "blocked") {
     return (
+      <div className="rounded-md border border-danger/40 bg-inset p-3 text-sm text-danger">
+        {ticket.blockedReason || "Blocked"}
+      </div>
+    );
+  }
+  return <RunForm ticket={ticket} />;
+}
+
+function DoneForm({ ticket }: { ticket: Ticket }) {
+  const config = useBoardStore((s) => s.config);
+  const handoffTicket = useBoardStore((s) => s.handoffTicket);
+  const flow = config.flows.find((f) => f.id === (ticket.flowId || config.activeFlowId));
+  const nextId = flow?.continueInFlowId;
+  const next = config.flows.find((f) => f.id === nextId);
+  return (
+    <div className="flex flex-col gap-3">
       <div className="rounded-md border border-border bg-inset p-3 text-sm text-muted">
         Filed {ticket.jiraCreated.length} issues. Pipeline complete.
         {ticket.jiraCreated.length > 0 ? (
@@ -125,16 +144,13 @@ function StepBody({ ticket }: { ticket: Ticket }) {
           </ul>
         ) : null}
       </div>
-    );
-  }
-  if (col.id === "blocked") {
-    return (
-      <div className="rounded-md border border-danger/40 bg-inset p-3 text-sm text-danger">
-        {ticket.blockedReason || "Blocked"}
-      </div>
-    );
-  }
-  return <RunForm ticket={ticket} />;
+      {next ? (
+        <Button variant="primary" size="md" className="w-full" onClick={() => void handoffTicket(ticket.id, next.id)}>
+          Continue in {next.name}
+        </Button>
+      ) : null}
+    </div>
+  );
 }
 
 function IdeationForm({ ticket }: { ticket: Ticket }) {

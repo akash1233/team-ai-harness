@@ -34,10 +34,11 @@ export function createDiscoveryFlow(): Flow {
   return {
     id: DISCOVERY_FLOW_ID,
     name: "Discovery",
-    description: "Brief → agenda → notes → spec → Grill Me → backlog → Jira.",
+    description: "Brief → agenda (Cursor) → notes → spec (Studio) → Grill Me → backlog (Cursor) → Jira.",
     columns: cloneColumns(),
     autoAdvance: true,
     autoRun: true,
+    continueInFlowId: QUICK_SPEC_FLOW_ID,
   };
 }
 
@@ -45,7 +46,7 @@ export function createQuickSpecFlow(): Flow {
   return {
     id: QUICK_SPEC_FLOW_ID,
     name: "Quick spec",
-    description: "Skip agenda and Slack. Brief → spec → grill → backlog → Jira.",
+    description: "Skip agenda and Slack. Brief → spec (Studio) → grill → backlog (Cursor) → Jira.",
     columns: cloneColumns([
       IDEATION_COLUMN_ID,
       SYNTHESIZE_COLUMN_ID,
@@ -96,7 +97,7 @@ export function createDefaultTeam(): TeamConfig {
   const flows = createDefaultFlows();
   const active = flows[0]!;
   return {
-    name: "DX Insights",
+    name: "Kindling",
     workflowName: active.name,
     jiraPrefix: "X2",
     defaultSlackChannel: "get-dx-insights-test",
@@ -109,7 +110,7 @@ export function createDefaultTeam(): TeamConfig {
     docs: DEFAULT_DOCS.map((d) => ({ ...d })),
     theme: "paper",
     density: "comfortable",
-    pipelineLayout: "vertical",
+    pipelineLayout: "horizontal",
     showSpend: true,
     autoAdvance: active.autoAdvance,
     execution: createDefaultExecution(),
@@ -160,6 +161,7 @@ function mergeFlow(saved: Partial<Flow>, fallback: Flow): Flow {
     columns: saved.columns?.length ? mergeColumns(saved.columns) : fallback.columns.map((c) => ({ ...c })),
     autoAdvance: saved.autoAdvance ?? fallback.autoAdvance,
     autoRun: saved.autoRun ?? fallback.autoRun,
+    continueInFlowId: saved.continueInFlowId ?? fallback.continueInFlowId,
   };
 }
 

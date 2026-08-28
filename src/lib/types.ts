@@ -150,6 +150,8 @@ export type Flow = {
   autoAdvance: boolean;
   /** Keep running agent stages, skipping review gates, until a human gate. */
   autoRun: boolean;
+  /** When this flow hits Done, continue the ticket on another flow (vars travel). */
+  continueInFlowId?: string;
 };
 
 export type TeamDoc = {

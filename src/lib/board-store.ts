@@ -67,6 +67,7 @@ type BoardState = {
   addLabel: (label: string) => void;
   removeLabel: (label: string) => void;
   continueAfter: (id: string) => Promise<void>;
+  handoffTicket: (id: string, flowId: string) => Promise<void>;
   setActiveFlow: (id: string) => void;
   addFlow: () => void;
   duplicateFlow: (id?: string) => void;
@@ -759,6 +760,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       if (!moved) return;
       const next = columnById(moved.columnId, get().config.columns);
       if (!next || next.role === "terminal") {
+        const handoff = flow.continueInFlowId;
+        if (handoff && handoff !== flow.id) {
+          await get().handoffTicket(id, handoff);
+          return;
+        }
         get().persist();
         return;
       }
@@ -774,6 +780,45 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       }
       get().persist();
       return;
+    }
+  },
+
+  handoffTicket: async (id, flowId) => {
+    const config = get().config;
+    const ticket = get().tickets.find((t) => t.id === id);
+    const target = config.flows.find((f) => f.id === flowId);
+    if (!ticket || !target || ticket.flowId === flowId) {
+      get().persist();
+      return;
+    }
+    const start =
+      target.columns.find((c) => {
+        if (!c.enabled || c.role === "terminal" || c.role === "review" || c.role === "approve") return false;
+        if (c.role === "collect-input") {
+          if (c.id === IDEATION_COLUMN_ID && (ticket.vars?.brief || ticket.slackChannel || ticket.slackMembers)) return false;
+          if (c.id === TRANSCRIPT_COLUMN_ID && (ticket.vars?.transcript || ticket.transcript)) return false;
+        }
+        return true;
+      })?.id ?? target.columns.find((c) => c.enabled)?.id;
+    if (!start) {
+      get().persist();
+      return;
+    }
+    const nextConfig = applyActiveFlow(config, flowId);
+    set({
+      config: nextConfig,
+      tickets: withTicket(get().tickets, id, {
+        flowId,
+        columnId: start,
+        status: "idle",
+      }),
+      activeStageId: start,
+      selectedId: id,
+    });
+    get().persist();
+    const col = columnById(start, nextConfig.columns);
+    if (target.autoRun && (col?.role === "prompt" || col?.role === "plan")) {
+      await get().runTicket(id);
     }
   },
 

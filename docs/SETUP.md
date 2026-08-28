@@ -1,6 +1,6 @@
 # Mac and org setup
 
-Operator guide for running **Team AI Harness** on a Mac and pointing it at Workday GenAI Studio / CIS.
+Operator guide for running **Kindling** on a Mac and pointing it at Workday GenAI Studio / CIS.
 
 Repo: [github.com/akash1233/team-ai-harness](https://github.com/akash1233/team-ai-harness)
 

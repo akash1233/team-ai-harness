@@ -264,4 +264,4 @@ Record the full meeting (transcript ingest is manual for now).`,
   }));
 }
 
-export const STORAGE_KEY = "pit-studio-v2";
+export const STORAGE_KEY = "kindling-v1";

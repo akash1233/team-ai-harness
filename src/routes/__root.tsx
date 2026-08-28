@@ -4,7 +4,7 @@ import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { Toaster } from "sonner";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "Team AI Harness";
+const APP_NAME = "Kindling";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -14,7 +14,7 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       {
         name: "description",
-        content: "Team AI Harness — a configurable Discovery studio for product teams.",
+        content: "Kindling — spark to spec. A configurable Discovery studio for product teams.",
       },
       { name: "theme-color", content: "#efebe3" },
     ],

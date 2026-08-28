@@ -1,6 +1,6 @@
-# Team AI Harness
+# Kindling
 
-Team workspace for running a Discovery pipeline with **Cursor**, **Claude**, **GenAI Studio**, or **CIS**. Stages publish variables. Grill Me interviews the spec. Spend is token-priced from Anthropic-style rates.
+Spark to spec. A team workspace that runs a Discovery pipeline with **Cursor**, **Claude**, **GenAI Studio**, or **CIS**. Stages publish variables. Grill Me interviews the spec. Spend is token-priced.
 
 Repo: [github.com/akash1233/team-ai-harness](https://github.com/akash1233/team-ai-harness)
 
@@ -108,9 +108,12 @@ With **Keep running agent stages** on, a successful run skips review gates and s
 
 | Stage | Default agent |
 | --- | --- |
-| Agenda, Spec | Cursor |
-| Grill, Backlog | Claude |
+| Agenda, Backlog | Cursor |
+| Spec | GenAI Studio |
+| Grill | Claude |
 | Everything else | Inherit |
+
+Discovery **continues into Quick spec** when a ticket hits Done (Settings → Flows). Vars travel with the ticket. Spec on Quick spec is Studio again, with the same `{{brief}}` `{{spec}}` `{{grill}}`.
 
 ## Grill Me
 

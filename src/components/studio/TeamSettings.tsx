@@ -39,8 +39,8 @@ export function TeamSettings() {
       <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden bg-surface shadow-panel md:h-5/6 md:rounded-xl md:border md:border-border">
         <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div>
-            <h2 className="font-serif text-2xl font-medium tracking-tight">Team AI Harness</h2>
-            <p className="text-sm text-muted">Mac-first. Hook Cursor or Claude locally, then pin an agent on each stage.</p>
+            <h2 className="font-serif text-2xl font-medium tracking-tight">Kindling</h2>
+            <p className="text-sm text-muted">Spark to spec. Settings feed every stage; each stage feeds the next.</p>
           </div>
           <button
             type="button"
@@ -298,6 +298,22 @@ function FlowsTab() {
         />
         Keep running agent stages (skip reviews) until a human gate — notes, grill answers, or sign-off
       </label>
+      <Field label="After Done, continue in">
+        <select
+          className="h-11 w-full rounded-md border border-border bg-inset px-2 text-sm"
+          value={flow.continueInFlowId ?? ""}
+          onChange={(e) => patchFlow({ continueInFlowId: e.target.value || undefined })}
+        >
+          <option value="">Stop here</option>
+          {config.flows
+            .filter((f) => f.id !== flow.id)
+            .map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+        </select>
+      </Field>
       <p className="text-2xs text-muted">
         Edit stages for <span className="text-fg">{flow.name}</span> on the Pipeline tab. Prompts may use {"{{brief}}"} {"{{spec}}"} {"{{grill}}"} {"{{plan}}"} {"{{transcript}}"} {"{{prev}}"} {"{{ticket.title}}"}.
       </p>

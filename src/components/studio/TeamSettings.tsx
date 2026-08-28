@@ -341,17 +341,48 @@ function FlowsTab() {
 function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
   const columns = useBoardStore((s) => s.config.columns);
   const prompts = useBoardStore((s) => s.config.prompts) ?? [];
+  const tickets = useBoardStore((s) => s.tickets);
   const updateColumn = useBoardStore((s) => s.updateColumn);
   const moveColumn = useBoardStore((s) => s.moveColumn);
   const addColumn = useBoardStore((s) => s.addColumn);
   const removeColumn = useBoardStore((s) => s.removeColumn);
   const addPrompt = useBoardStore((s) => s.addPrompt);
+  const testStage = useBoardStore((s) => s.testStage);
+  const [testing, setTesting] = useState<string | null>(null);
+
+  async function runTest(id: string) {
+    setTesting(id);
+    try {
+      await testStage(id);
+    } finally {
+      setTesting(null);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted">
-        Order is the pipeline. Each row is one stage: what the team sees, whether an agent runs, which prompt it uses, and the variable it publishes for later stages.
-      </p>
+      <div className="rounded-md border border-border bg-inset px-3 py-2 text-sm text-muted">
+        <p>
+          This tab is the <strong className="font-medium text-fg">recipe</strong>. Execution happens on the board (or <strong className="font-medium text-fg">Test this stage</strong> below).
+        </p>
+        <ul className="mt-2 list-disc space-y-1 pl-4 text-2xs">
+          <li>
+            <strong className="text-fg">Stage</strong> — one step in order (01, 02…). Tickets start in stage 01 even if it is an agent step.
+          </li>
+          <li>
+            <strong className="text-fg">What this stage does</strong> — “Agent runs” actually calls Claude/Cursor. “Team types this” is human input. Review/approve are gates.
+          </li>
+          <li>
+            <strong className="text-fg">Who runs it</strong> — Claude, Cursor, Studio, or CIS for this step only.
+          </li>
+          <li>
+            <strong className="text-fg">Variable</strong> — the output name. Any later prompt can use <span className="font-mono">{"{{agenda}}"}</span>. Same as a flow variable, not a test.
+          </li>
+          <li>
+            <strong className="text-fg">Test this stage</strong> — runs this step now on the open ticket (creates a scratch ticket if you have none). Execution → Test Claude is only a ping that the CLI works.
+          </li>
+        </ul>
+      </div>
       <ul className="flex flex-col gap-2">
         {columns.map((col, i) => (
           <li key={col.id} className="rounded-md border border-border bg-elevated p-3">
@@ -433,11 +464,11 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                   </div>
                 </label>
               ) : null}
-              <label className="flex w-28 flex-col gap-1">
-                <span className="text-micro text-subtle">Publishes as</span>
+              <label className="flex w-36 flex-col gap-1">
+                <span className="text-micro text-subtle">Variable</span>
                 <Input
                   className="h-11 font-mono"
-                  placeholder="spec"
+                  placeholder="agenda"
                   value={col.outputKey ?? ""}
                   onChange={(e) => updateColumn(col.id, { outputKey: e.target.value.trim() })}
                 />
@@ -468,18 +499,43 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
               >
                 <ChevronDown className="size-4" />
               </button>
-              {col.custom ? (
+              {!col.locked && columns.filter((c) => !c.locked).length > 1 ? (
                 <button
                   type="button"
                   className="flex size-11 items-center justify-center rounded-md text-subtle hover:text-danger"
-                  aria-label="Remove stage"
-                  onClick={() => removeColumn(col.id)}
+                  aria-label="Delete stage"
+                  title="Delete stage"
+                  onClick={() => {
+                    if (window.confirm(`Delete stage “${col.name}”? Tickets here move to stage 01.`)) {
+                      removeColumn(col.id);
+                    }
+                  }}
                 >
                   <Trash2 className="size-4" />
                 </button>
               ) : null}
             </div>
-            <p className="mt-2 text-2xs text-muted">{ROLE_LABEL[col.role]}{col.outputKey ? ` · later stages read {{${col.outputKey}}}` : ""}</p>
+            <p className="mt-2 text-2xs text-muted">
+              {ROLE_LABEL[col.role]}
+              {col.outputKey ? (
+                <>
+                  {" · "}later stages read <span className="font-mono text-fg">{`{{${col.outputKey}}}`}</span>
+                </>
+              ) : (
+                " · set a variable name so later stages can use this output"
+              )}
+            </p>
+            {col.role === "prompt" || col.role === "plan" ? (
+              <Button
+                variant="primary"
+                size="sm"
+                className="mt-2"
+                disabled={testing !== null}
+                onClick={() => void runTest(col.id)}
+              >
+                {testing === col.id ? "Running…" : `Test this stage (${tickets.length ? "open ticket" : "scratch ticket"})`}
+              </Button>
+            ) : null}
           </li>
         ))}
       </ul>
@@ -490,6 +546,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
     </div>
   );
 }
+
 
 function PromptsTab({ focusId, onFocus }: { focusId: string | null; onFocus: (id: string) => void }) {
   const columns = useBoardStore((s) => s.config.columns);

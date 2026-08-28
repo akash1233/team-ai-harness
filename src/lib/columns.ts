@@ -191,6 +191,23 @@ export function columnById(
   return columns.find((c) => c.id === id);
 }
 
+/** First enabled collect-input, else the first enabled stage — tickets always have a home. */
+export function startColumnId(columns: WorkflowColumn[]): string {
+  const enabled = columns.filter((c) => c.enabled);
+  return (
+    enabled.find((c) => c.role === "collect-input")?.id ||
+    enabled[0]?.id ||
+    columns[0]?.id ||
+    IDEATION_COLUMN_ID
+  );
+}
+
+export function parkOrphanTickets<T extends { columnId: string }>(tickets: T[], columns: WorkflowColumn[]): T[] {
+  const ids = new Set(columns.map((c) => c.id));
+  const start = startColumnId(columns);
+  return tickets.map((t) => (ids.has(t.columnId) ? t : { ...t, columnId: start }));
+}
+
 export function nextColumnId(
   columnId: string,
   columns: WorkflowColumn[] = COLUMNS,

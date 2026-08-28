@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { COLUMNS, PREP_AGENDA_COLUMN_ID, SYNTHESIZE_COLUMN_ID, WRITE_PLAN_COLUMN_ID } from "./columns.ts";
+import { COLUMNS, PREP_AGENDA_COLUMN_ID, SYNTHESIZE_COLUMN_ID, WRITE_PLAN_COLUMN_ID, startColumnId } from "./columns.ts";
 import { buildContext, harvestVars, interpolate, outputVarName } from "./flow-context.ts";
 import type { Ticket } from "./types.ts";
 
@@ -63,4 +63,12 @@ test("spec (Studio) prompt reads brief + transcript from prior stages", () => {
   const filled = interpolate(spec.promptTemplate || "", buildContext(t));
   assert.match(filled, /channel #dx/);
   assert.match(filled, /ship voice on Grill first/);
+});
+
+test("tickets start on first agent stage if there is no collect-input", () => {
+  const cols = [
+    { id: "test", name: "Test", label: "Test", role: "prompt" as const, rail: "run" as const, enabled: true },
+    { id: "agenda", name: "Agenda", label: "Agenda", role: "prompt" as const, rail: "run" as const, enabled: true },
+  ];
+  assert.equal(startColumnId(cols), "test");
 });

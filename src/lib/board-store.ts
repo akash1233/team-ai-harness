@@ -10,6 +10,8 @@ import {
   FRY_COLUMN_ID,
   IDEATION_COLUMN_ID,
   nextColumnId,
+  parkOrphanTickets,
+  startColumnId,
   TRANSCRIPT_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
   columnById,
@@ -76,6 +78,7 @@ type BoardState = {
   moveColumn: (id: string, dir: -1 | 1) => void;
   addColumn: () => void;
   removeColumn: (id: string) => void;
+  testStage: (columnId: string) => Promise<void>;
   addMember: (member: Omit<TeamMember, "id">) => void;
   updateMember: (id: string, patch: Partial<Omit<TeamMember, "id">>) => void;
   removeMember: (id: string) => void;
@@ -149,7 +152,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         if (Array.isArray(parsed.tickets) && parsed.tickets.length > 0) {
           const config = parsed.config ? mergeTeamConfig(parsed.config) : createDefaultTeam();
           set({
-            tickets: parsed.tickets.map((t) => stampTicket(t, config.activeFlowId)),
+            tickets: parkOrphanTickets(
+              parsed.tickets.map((t) => stampTicket(t, config.activeFlowId)),
+              config.columns,
+            ),
             config,
             selectedId: parsed.selectedId ?? null,
             activeStageId: parsed.activeStageId ?? FRY_COLUMN_ID,
@@ -211,8 +217,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const runId = uid();
     const { tickets, config } = get();
     const keys = tickets.map((t) => t.key);
-    const start =
-      config.columns.find((c) => c.enabled && c.role === "collect-input")?.id ?? IDEATION_COLUMN_ID;
+    const start = startColumnId(config.columns);
     const extra = connectorVars(linkedJira, linkedRepo);
     const ticket: Ticket = {
       id,
@@ -755,13 +760,39 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   removeColumn: (id) => {
     const col = get().config.columns.find((c) => c.id === id);
     if (!col || col.locked) return;
+    const remaining = get().config.columns.filter((c) => c.id !== id);
+    if (remaining.length === 0) return;
+    const start = startColumnId(remaining);
     set({
-      config: writeFlowColumns(
-        get().config,
-        get().config.columns.filter((c) => c.id !== id),
-      ),
+      config: writeFlowColumns(get().config, remaining),
+      tickets: get().tickets.map((t) => (t.columnId === id ? { ...t, columnId: start } : t)),
     });
     get().persist();
+  },
+
+  testStage: async (columnId) => {
+    const col = columnById(columnId, get().config.columns);
+    if (!col) return;
+    const flowId = get().config.activeFlowId;
+    let ticket =
+      get().tickets.find((t) => t.id === get().selectedId) ??
+      get().tickets.find((t) => (t.flowId || DISCOVERY_FLOW_ID) === flowId);
+    if (!ticket) {
+      const id = get().addTicket({
+        title: `Test · ${col.name}`,
+        description: "Scratch ticket so this stage can run.",
+      });
+      ticket = get().tickets.find((t) => t.id === id);
+    }
+    if (!ticket) return;
+    if (ticket.columnId !== columnId) get().moveTicket(ticket.id, columnId);
+    get().toggleSettings(false);
+    if (col.role === "collect-input" || col.role === "terminal") return;
+    if (col.role === "review" || col.role === "approve") {
+      get().approve(ticket.id);
+      return;
+    }
+    await get().runTicket(ticket.id);
   },
 
   addMember: (member) => {

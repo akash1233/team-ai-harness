@@ -549,7 +549,7 @@ function MacAgentHints() {
         <li>
           <p className="font-medium">Test, then turn off demo text</p>
           <p className="text-2xs text-muted">
-            Use Test setup. You want a path plus a --version line, not “not on PATH”. Then uncheck demo fallbacks.
+            Use Test Cursor / Test Claude. You want a path plus a --version line. Uncheck connectivity-only to send a cheap Haiku/Composer ping.
           </p>
         </li>
       </ol>
@@ -568,34 +568,47 @@ function ExecutionTab() {
     error?: string;
     checks?: { ok: boolean; label: string; detail: string }[];
   } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState("Reply with exactly: pong");
+  const [connectOnly, setConnectOnly] = useState(false);
+  const [mcpServer, setMcpServer] = useState("");
 
   function patch(partial: Partial<typeof exec>) {
     patchConfig({ execution: { ...exec, ...partial } });
   }
 
-  async function test() {
-    setBusy(true);
-    setProbe({ ok: true, via: executionLabel(exec), text: "Checking setup…" });
+  async function test(stepAgent: StepAgent, extra?: { mcp?: boolean }) {
+    const label = extra?.mcp ? `${stepAgent}-mcp` : stepAgent;
+    setBusy(label);
+    setProbe({ ok: true, via: stepAgent, text: extra?.mcp ? "Checking MCP…" : connectOnly ? "Checking setup…" : "Running cheapest-model ping…" });
     try {
-      const result = await testExecution({ data: { execution: exec, stepAgent: "inherit" } });
+      const result = await testExecution({
+        data: {
+          execution: exec,
+          stepAgent,
+          mode: extra?.mcp || connectOnly ? "connect" : "run",
+          prompt,
+          mcp: extra?.mcp,
+          mcpServer,
+        },
+      });
       setProbe(result);
     } catch (err) {
       setProbe({
         ok: false,
-        via: executionLabel(exec),
+        via: stepAgent,
         text: "",
         error: err instanceof Error ? err.message : "Setup check failed",
       });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        Test setup checks that the default agent is installed and callable from this app — not a Discovery ticket. Pipeline still pins Cursor, Claude, Studio, or CIS per stage.
+        Test Cursor and Claude separately. Connectivity only checks the CLI. Unchecked, it sends your prompt on the cheapest model (Haiku / Composer) and shows the response.
       </p>
       <MacAgentHints />
       {exec.demoFallbacks ? (
@@ -603,17 +616,82 @@ function ExecutionTab() {
           Demo text is on. If the agent is missing, Run still produces canned output. Turn this off once Cursor, Claude, or Studio is hooked up.
         </p>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void test()}
-          className="inline-flex h-11 items-center rounded-md bg-accent px-4 text-sm font-medium text-accent-fg disabled:opacity-40"
-        >
-          {busy ? "Checking…" : "Test setup"}
-        </button>
-        <span className="text-2xs text-muted">Checks {executionLabel(exec)}.</span>
-      </div>
+
+      <section className="flex flex-col gap-3 rounded-md border border-border p-3">
+        <h3 className="text-sm font-medium">Agent test</h3>
+        <label className="flex min-h-11 items-center gap-3 text-sm">
+          <input type="checkbox" checked={connectOnly} onChange={(e) => setConnectOnly(e.target.checked)} />
+          Connectivity only (skip the model ping)
+        </label>
+        <Field label="Test prompt">
+          <Textarea
+            className="min-h-20"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            disabled={connectOnly}
+          />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={Boolean(busy)}
+            onClick={() => void test("cursor")}
+            className="inline-flex h-11 items-center rounded-md bg-accent px-4 text-sm font-medium text-accent-fg disabled:opacity-40"
+          >
+            {busy === "cursor" ? "Testing…" : "Test Cursor"}
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(busy)}
+            onClick={() => void test("claude")}
+            className="inline-flex h-11 items-center rounded-md bg-accent px-4 text-sm font-medium text-accent-fg disabled:opacity-40"
+          >
+            {busy === "claude" ? "Testing…" : "Test Claude"}
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(busy)}
+            onClick={() => void test("inherit")}
+            className="inline-flex h-11 items-center rounded-md border border-border px-4 text-sm disabled:opacity-40"
+          >
+            {busy === "inherit" ? "Testing…" : `Test default (${executionLabel(exec)})`}
+          </button>
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-3 rounded-md border border-border p-3">
+        <h3 className="text-sm font-medium">MCP</h3>
+        <p className="text-2xs text-muted">
+          Connectivity of MCP servers the CLI can see. Runs <span className="font-mono">claude mcp list</span> or{" "}
+          <span className="font-mono">agent mcp list</span>. Optional name runs <span className="font-mono">mcp get</span>.
+        </p>
+        <Field label="MCP server name (optional)">
+          <Input
+            className="font-mono"
+            value={mcpServer}
+            placeholder="github"
+            onChange={(e) => setMcpServer(e.target.value)}
+          />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={Boolean(busy)}
+            onClick={() => void test("claude", { mcp: true })}
+            className="inline-flex h-11 items-center rounded-md border border-border px-4 text-sm disabled:opacity-40"
+          >
+            {busy === "claude-mcp" ? "Checking…" : "Test Claude MCP"}
+          </button>
+          <button
+            type="button"
+            disabled={Boolean(busy)}
+            onClick={() => void test("cursor", { mcp: true })}
+            className="inline-flex h-11 items-center rounded-md border border-border px-4 text-sm disabled:opacity-40"
+          >
+            {busy === "cursor-mcp" ? "Checking…" : "Test Cursor MCP"}
+          </button>
+        </div>
+      </section>
       {probe ? (
         <div
           role="status"
@@ -628,7 +706,7 @@ function ExecutionTab() {
               {probe.checks.map((c) => (
                 <li key={c.label} className="text-2xs">
                   <span className={cn("font-medium", c.ok ? "text-fg" : "text-danger")}>{c.ok ? "Pass" : "Fail"} · {c.label}</span>
-                  <span className="mt-0.5 block text-muted">{c.detail}</span>
+                  <span className="mt-0.5 block whitespace-pre-wrap text-muted">{c.detail}</span>
                 </li>
               ))}
             </ul>
@@ -668,6 +746,13 @@ function ExecutionTab() {
         <Field label="Local command">
           <Input className="font-mono" value={exec.cursorCommand} onChange={(e) => patch({ cursorCommand: e.target.value })} />
         </Field>
+        <Field label="Test model (cheapest ping)">
+          <Input
+            className="font-mono"
+            value={exec.cursorTestModel ?? "composer-1"}
+            onChange={(e) => patch({ cursorTestModel: e.target.value })}
+          />
+        </Field>
         <Field label="Remote URL">
           <Input
             className="font-mono"
@@ -686,6 +771,13 @@ function ExecutionTab() {
         />
         <Field label="Local command">
           <Input className="font-mono" value={exec.claudeCommand} onChange={(e) => patch({ claudeCommand: e.target.value })} />
+        </Field>
+        <Field label="Test model (cheapest ping)">
+          <Input
+            className="font-mono"
+            value={exec.claudeTestModel ?? "haiku"}
+            onChange={(e) => patch({ claudeTestModel: e.target.value })}
+          />
         </Field>
         <Field label="Remote URL">
           <Input

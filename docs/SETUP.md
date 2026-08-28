@@ -67,7 +67,7 @@ claude --version
 ### After install
 
 1. Stop the harness (`Ctrl+C`) and run `npm run dev` again in that same shell.
-2. **Settings → Execution → Test setup**.
+2. **Settings → Execution → Test Cursor** and **Test Claude**.
 3. You want a path like `/Users/you/.local/bin/agent`, not “not on PATH”.
 4. Uncheck **Use demo text if the agent is offline**.
 
@@ -96,7 +96,7 @@ Restart the dev server after changing env.
 
 ## First-run checklist
 
-1. Open the app → **Settings** (green gear in the header) → **Execution**. Follow the Mac steps, then **Test setup**.
+1. Open the app → **Settings** (green gear in the header) → **Execution**. Follow the Mac steps, then **Test Cursor** and **Test Claude**. **Test Claude MCP** lists MCP servers (`claude mcp list`).
 2. **Pipeline**: Agenda/Spec = Cursor, Grill/Backlog = Claude (shipped defaults).
 3. **Docs**: Grill Me skill + Discovery conventions.
 4. **Execution → Token pricing**: rates used for the $ on tickets. Studio/CIS use API usage when present; local CLI estimates characters ÷ 4.

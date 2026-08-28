@@ -85,6 +85,8 @@ export function createDefaultExecution(): ExecutionConfig {
     timeoutMs: 120000,
     demoFallbacks: true,
     pricing: mergePricing(),
+    claudeTestModel: "haiku",
+    cursorTestModel: "composer-1",
     provider: "local",
     localAgent: "cursor",
   };

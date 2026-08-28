@@ -35,7 +35,7 @@ The **Settings** gear in the header is the control plane. Nothing about the pipe
 | **Pipeline** | Stage order, labels, role, **agent per stage**, output variable |
 | **Prompts** | Prompt templates (`{{spec}}`, `{{grill}}`, …) and per-stage Studio prompt IDs |
 | **Docs** | Grill Me skill + notes the grill reads |
-| **Execution** | Default agent, Cursor/Claude local vs remote, Studio/CIS, **Test setup**, **token pricing** |
+| **Execution** | Default agent, Cursor/Claude local vs remote, Studio/CIS, **Test Cursor / Test Claude**, MCP list, **token pricing** |
 | **Look** | Vertical vs horizontal board, theme, density, show spend |
 
 Env vars in [`.env.example`](.env.example) override Execution. Full Mac/agent matrix: [docs/SETUP.md](docs/SETUP.md).
@@ -59,7 +59,7 @@ Formula: `(inputTokens × inputRate + outputTokens × outputRate) / 1_000_000`. 
 
 ## Hook up Cursor / Claude on a Mac
 
-The harness spawns a CLI. Until `agent` or `claude` is on PATH, **Settings → Execution → Test setup** will fail the CLI check.
+The harness spawns a CLI. Until `agent` or `claude` is on PATH, **Settings → Execution → Test Cursor** / **Test Claude** will fail the CLI check.
 
 **Cursor Agent**
 
@@ -81,7 +81,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 which claude && claude --version
 ```
 
-Then restart `npm run dev` **from that Terminal**, Test setup, uncheck demo fallbacks.
+Then restart `npm run dev` **from that Terminal**, Test Cursor and Test Claude, uncheck demo fallbacks. Uncheck connectivity-only to send your prompt on Haiku / Composer. **Test Claude MCP** runs `claude mcp list`.
 
 ## Flows and variables
 

@@ -275,7 +275,16 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
   });
 
 export const testExecution = createServerFn({ method: "POST" })
-  .validator((input: { execution?: ExecutionConfig; stepAgent?: StepAgent }) => input)
+  .validator(
+    (input: {
+      execution?: ExecutionConfig;
+      stepAgent?: StepAgent;
+      mode?: "connect" | "run";
+      prompt?: string;
+      mcp?: boolean;
+      mcpServer?: string;
+    }) => input,
+  )
   .handler(
     async ({
       data,
@@ -288,11 +297,17 @@ export const testExecution = createServerFn({ method: "POST" })
     }> => {
       try {
         const { probeSetup } = await import("./execution.server");
-        const result = await probeSetup(data.execution, data.stepAgent);
+        const result = await probeSetup(data.execution, data.stepAgent, {
+          stepAgent: data.stepAgent,
+          mode: data.mode,
+          prompt: data.prompt,
+          mcp: data.mcp,
+          mcpServer: data.mcpServer,
+        });
         return {
           ok: result.ok,
           via: result.via,
-          text: result.text.slice(0, 400),
+          text: result.text.slice(0, 800),
           error: result.error,
           checks: result.checks,
         };

@@ -156,6 +156,20 @@ export type SetupCheck = {
   detail: string;
 };
 
+export type ProbeOptions = {
+  stepAgent?: StepAgent;
+  mode?: "connect" | "run";
+  prompt?: string;
+  mcp?: boolean;
+  mcpServer?: string;
+};
+
+export function withModelFlag(args: string[], model: string): string[] {
+  if (!model.trim()) return args;
+  if (args.some((a) => a === "--model" || a === "-m" || a.startsWith("--model="))) return args;
+  return ["--model", model.trim(), ...args];
+}
+
 export type SetupReport = {
   ok: boolean;
   via: string;
@@ -501,6 +515,162 @@ export async function runModel(opts: {
   return cost(await callLocalCli(exec, prompt, kind));
 }
 
+async function runCliRaw(
+  bin: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ code: number | null; out: string; err: string }> {
+  const { spawn } = await import("node:child_process");
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (code: number | null, out: string, err: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, out: out.trim(), err: err.trim() });
+    };
+    let child: import("node:child_process").ChildProcess;
+    try {
+      child = spawn(bin, args, {
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      finish(1, "", err instanceof Error ? err.message : String(err));
+      return;
+    }
+    let out = "";
+    let err = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(1, out, err || `${bin} timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }, timeoutMs);
+    child.stdout?.on("data", (d: Buffer) => {
+      out += d.toString();
+    });
+    child.stderr?.on("data", (d: Buffer) => {
+      err += d.toString();
+    });
+    child.on("error", (e) => finish(1, out, e.message));
+    child.on("close", (code) => finish(code, out, err));
+  });
+}
+
+type LocatedCli = {
+  kind: "cursor" | "claude";
+  bin: string;
+  args: string[];
+  found: { path: string; onPath: boolean; name: string } | null;
+};
+
+async function locateCli(kind: "cursor" | "claude", exec: ExecutionConfig): Promise<LocatedCli> {
+  const line = kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
+  const { bin, args } = parseCommand(line);
+  const aliases = kind === "claude" ? CLAUDE_ALIASES : CURSOR_ALIASES;
+  const names = [bin, ...aliases.filter((a) => a !== bin)];
+  let found: LocatedCli["found"] = null;
+  for (const name of names) {
+    const hit = await locateBin(name);
+    if (hit) {
+      found = { ...hit, name };
+      break;
+    }
+  }
+  return { kind, bin, args, found };
+}
+
+function pushCliChecks(checks: SetupCheck[], located: LocatedCli): boolean {
+  const via = located.kind === "claude" ? "Claude" : "Cursor";
+  if (!located.found) {
+    checks.push({
+      ok: false,
+      label: `${via} CLI`,
+      detail: `\`${located.bin}\` was not on PATH or in ~/.local/bin, /opt/homebrew/bin, /usr/local/bin. Install it, then restart npm run dev from Terminal.`,
+    });
+    return false;
+  }
+  if (located.found.name !== located.bin) {
+    checks.push({
+      ok: false,
+      label: `${via} command`,
+      detail: `Configured \`${located.bin}\` is missing. Found \`${located.found.name}\` at ${located.found.path}. Set the local command to: ${located.found.name} -p --output-format text`,
+    });
+  } else if (!located.found.onPath) {
+    checks.push({
+      ok: true,
+      label: `${via} CLI`,
+      detail: `Found at ${located.found.path} (not on Node PATH). Runs will use this path.`,
+    });
+  } else {
+    checks.push({
+      ok: true,
+      label: `${via} CLI`,
+      detail: `Found ${located.found.name} at ${located.found.path}`,
+    });
+  }
+  return true;
+}
+
+async function pingAgent(
+  located: LocatedCli,
+  exec: ExecutionConfig,
+  prompt: string,
+): Promise<SetupCheck> {
+  const via = located.kind === "claude" ? "Claude" : "Cursor";
+  const model =
+    located.kind === "claude"
+      ? exec.claudeTestModel?.trim() || "haiku"
+      : exec.cursorTestModel?.trim() || "composer-1";
+  const args = withModelFlag(located.args, model);
+  const raw = await runCliRaw(located.found!.path, [...args, prompt], Math.min(Math.max(exec.timeoutMs, 15000), 60000));
+  const body = (raw.out || raw.err).slice(0, 800);
+  const ok = raw.code === 0 && Boolean(raw.out.trim());
+  return {
+    ok,
+    label: `${via} test run (${model})`,
+    detail: ok
+      ? `request: ${prompt}\nresponse: ${body}`
+      : `request: ${prompt}\n${body || `exit ${raw.code}`}`,
+  };
+}
+
+async function probeMcp(kind: "cursor" | "claude", located: LocatedCli, server?: string): Promise<SetupCheck[]> {
+  const via = kind === "claude" ? "Claude" : "Cursor";
+  if (!located.found) {
+    return [{ ok: false, label: `${via} MCP`, detail: `${via} CLI is not installed — cannot list MCP servers.` }];
+  }
+  const list = await runCliRaw(located.found.path, ["mcp", "list"], 20000);
+  const text = (list.out || list.err).slice(0, 1200);
+  const checks: SetupCheck[] = [];
+  if (list.code !== 0 && !text) {
+    checks.push({
+      ok: false,
+      label: `${via} MCP list`,
+      detail: `${via} does not expose \`mcp list\` or it failed.`,
+    });
+    return checks;
+  }
+  const failed = /✘|Failed to connect/i.test(text);
+  const none = !text.trim() || /no mcp servers|none configured|0 servers/i.test(text);
+  checks.push({
+    ok: list.code === 0 && !failed,
+    label: `${via} MCP list`,
+    detail: none ? "No MCP servers configured." : text || `exit ${list.code}`,
+  });
+  const name = server?.trim();
+  if (name) {
+    const get = await runCliRaw(located.found.path, ["mcp", "get", name], 20000);
+    const body = (get.out || get.err).slice(0, 800);
+    const issue = /Issue:|Failed to connect|✘/i.test(body);
+    checks.push({
+      ok: get.code === 0 && !issue,
+      label: `${via} MCP get ${name}`,
+      detail: body || `exit ${get.code}`,
+    });
+  }
+  return checks;
+}
+
 async function lookupBin(bin: string): Promise<string | null> {
   const hit = await locateBin(bin);
   return hit?.path ?? null;
@@ -569,31 +739,23 @@ async function runVersion(binPath: string): Promise<{ ok: boolean; text: string 
 const CURSOR_ALIASES = ["agent", "cursor-agent", "cursor"];
 const CLAUDE_ALIASES = ["claude"];
 
-export async function probeSetup(execution?: ExecutionConfig, stepAgent?: StepAgent): Promise<SetupReport> {
-  const exec = { ...resolveExecution(execution), timeoutMs: 8000 };
-  const step = resolveStep({ agent: stepAgent ?? "inherit" }, exec);
+export async function probeSetup(
+  execution?: ExecutionConfig,
+  stepAgent?: StepAgent,
+  options?: ProbeOptions,
+): Promise<SetupReport> {
+  const exec = resolveExecution(execution);
+  const step = resolveStep({ agent: options?.stepAgent ?? stepAgent ?? "inherit" }, exec);
   const checks: SetupCheck[] = [];
   const via = step.label;
+  const mode = options?.mode ?? "connect";
+  const prompt = (options?.prompt || "Reply with exactly: pong").trim();
 
   checks.push({
     ok: true,
-    label: "Default agent",
+    label: "Agent",
     detail: `${via}${exec.demoFallbacks ? " · demo fallbacks are still on" : ""}`,
   });
-
-  if (exec.demoFallbacks) {
-    checks.push({
-      ok: true,
-      label: "Demo fallbacks",
-      detail: "On — canned text if the agent fails. Turn off after this setup check passes.",
-    });
-  } else {
-    checks.push({
-      ok: true,
-      label: "Demo fallbacks",
-      detail: "Off — a missing agent will fail closed instead of inventing output.",
-    });
-  }
 
   if (step.kind === "studio" || step.kind === "cis") {
     const base = exec.studioBaseUrl.trim();
@@ -634,6 +796,26 @@ export async function probeSetup(execution?: ExecutionConfig, stepAgent?: StepAg
         checks.push({ ok: false, label: "URL shape", detail: "Base URL is not a valid http(s) URL." });
       }
     }
+    if (mode === "run" && checks.every((c) => c.ok)) {
+      const ping = await runModel({
+        system: "You are a connectivity probe. Reply with exactly: pong",
+        user: prompt,
+        maxTokens: 16,
+        execution: { ...exec, timeoutMs: 20000 },
+        stepAgent: step.kind,
+      });
+      checks.push({
+        ok: ping.ok,
+        label: `${via} test run`,
+        detail: ping.ok
+          ? `request: ${prompt}\nresponse: ${ping.text.slice(0, 400)}`
+          : ping.error || "empty response",
+      });
+    }
+  } else if (options?.mcp && (step.kind === "cursor" || step.kind === "claude")) {
+    const located = await locateCli(step.kind, exec);
+    pushCliChecks(checks, located);
+    checks.push(...(await probeMcp(step.kind, located, options.mcpServer)));
   } else if (step.target === "remote") {
     const remoteUrl = (step.kind === "claude" ? exec.claudeRemoteUrl : exec.cursorRemoteUrl).trim();
     checks.push({
@@ -653,7 +835,23 @@ export async function probeSetup(execution?: ExecutionConfig, stepAgent?: StepAg
         checks.push({ ok: false, label: "URL shape", detail: "Remote URL is not a valid http(s) URL." });
       }
     }
-  } else if (exec.localHttpUrl.trim()) {
+    if (mode === "run" && remoteUrl) {
+      const ping = await runModel({
+        system: "You are a connectivity probe. Reply with exactly: pong",
+        user: prompt,
+        maxTokens: 16,
+        execution: { ...exec, timeoutMs: 20000 },
+        stepAgent: step.kind,
+      });
+      checks.push({
+        ok: ping.ok,
+        label: `${via} test run`,
+        detail: ping.ok
+          ? `request: ${prompt}\nresponse: ${ping.text.slice(0, 400)}`
+          : ping.error || "empty response",
+      });
+    }
+  } else if (exec.localHttpUrl.trim() && !options?.mcp) {
     const sidecar = exec.localHttpUrl.trim();
     try {
       const url = new URL(chatCompletionsUrl(sidecar));
@@ -665,51 +863,35 @@ export async function probeSetup(execution?: ExecutionConfig, stepAgent?: StepAg
     } catch {
       checks.push({ ok: false, label: "Local HTTP sidecar", detail: "Sidecar URL is not valid." });
     }
-  } else {
-    const line = step.kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
-    const { bin } = parseCommand(line);
-    const aliases = step.kind === "claude" ? CLAUDE_ALIASES : CURSOR_ALIASES;
-    const names = [bin, ...aliases.filter((a) => a !== bin)];
-    let found: { path: string; onPath: boolean; name: string } | null = null;
-    for (const name of names) {
-      const hit = await locateBin(name);
-      if (hit) {
-        found = { ...hit, name };
-        break;
-      }
-    }
-    if (!found) {
-      checks.push({
-        ok: false,
-        label: "CLI on this machine",
-        detail: `\`${bin}\` was not on PATH or in ~/.local/bin, /opt/homebrew/bin, /usr/local/bin. Install the CLI, then restart npm run dev from Terminal.`,
+    if (mode === "run") {
+      const ping = await runModel({
+        system: "You are a connectivity probe. Reply with exactly: pong",
+        user: prompt,
+        maxTokens: 16,
+        execution: { ...exec, timeoutMs: 20000 },
+        stepAgent: step.kind,
       });
-    } else {
-      if (found.name !== bin) {
-        checks.push({
-          ok: false,
-          label: "CLI command",
-          detail: `Configured \`${bin}\` is missing. Found \`${found.name}\` at ${found.path}. Set the local command to: ${found.name} -p --output-format text`,
-        });
-      } else if (!found.onPath) {
-        checks.push({
-          ok: true,
-          label: "CLI on this machine",
-          detail: `Found at ${found.path} (not on Node PATH). Runs will use this path. Add ~/.local/bin to ~/.zshrc so shells see it too.`,
-        });
-      } else {
-        checks.push({
-          ok: true,
-          label: "CLI on this machine",
-          detail: `Found ${found.name} at ${found.path}`,
-        });
-      }
-      const ver = await runVersion(found.path);
+      checks.push({
+        ok: ping.ok,
+        label: `${via} test run`,
+        detail: ping.ok
+          ? `request: ${prompt}\nresponse: ${ping.text.slice(0, 400)}`
+          : ping.error || "empty response",
+      });
+    }
+  } else if (step.kind === "cursor" || step.kind === "claude") {
+    const located = await locateCli(step.kind, exec);
+    const present = pushCliChecks(checks, located);
+    if (located.found) {
+      const ver = await runVersion(located.found.path);
       checks.push({
         ok: ver.ok,
-        label: `${found.name} --version`,
-        detail: ver.ok ? ver.text : ver.text || "CLI did not print a version. Open a Terminal and run it yourself.",
+        label: `${located.found.name} --version`,
+        detail: ver.ok ? ver.text : ver.text || "CLI did not print a version.",
       });
+    }
+    if (present && located.found && mode === "run") {
+      checks.push(await pingAgent(located, exec, prompt));
     }
   }
 
@@ -718,7 +900,7 @@ export async function probeSetup(execution?: ExecutionConfig, stepAgent?: StepAg
   const text = ok
     ? checks
         .filter((c) => c.ok)
-        .map((c) => c.detail)
+        .map((c) => c.detail.split("\n")[0])
         .slice(0, 2)
         .join(" · ")
     : failed[0]?.detail || "Setup incomplete";

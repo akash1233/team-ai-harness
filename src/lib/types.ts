@@ -57,6 +57,10 @@ export type ExecutionConfig = {
   timeoutMs: number;
   demoFallbacks: boolean;
   pricing: PricingConfig;
+  /** Cheapest model used by Test run (Claude `--model`). */
+  claudeTestModel?: string;
+  /** Cheapest model used by Test run (Cursor `--model`). */
+  cursorTestModel?: string;
   /** @deprecated hydrated from older workspaces */
   provider?: ExecutionProvider;
   /** @deprecated hydrated from older workspaces */

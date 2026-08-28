@@ -341,7 +341,6 @@ function FlowsTab() {
 function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
   const columns = useBoardStore((s) => s.config.columns);
   const prompts = useBoardStore((s) => s.config.prompts) ?? [];
-  const tickets = useBoardStore((s) => s.tickets);
   const updateColumn = useBoardStore((s) => s.updateColumn);
   const moveColumn = useBoardStore((s) => s.moveColumn);
   const addColumn = useBoardStore((s) => s.addColumn);
@@ -349,11 +348,14 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
   const addPrompt = useBoardStore((s) => s.addPrompt);
   const testStage = useBoardStore((s) => s.testStage);
   const [testing, setTesting] = useState<string | null>(null);
+  const [stageInput, setStageInput] = useState<Record<string, string>>({});
+  const [stageOut, setStageOut] = useState<Record<string, { ok: boolean; text: string; error?: string; variable?: string }>>({});
 
   async function runTest(id: string) {
     setTesting(id);
     try {
-      await testStage(id);
+      const r = await testStage(id, stageInput[id]);
+      setStageOut((prev) => ({ ...prev, [id]: r }));
     } finally {
       setTesting(null);
     }
@@ -363,25 +365,8 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
     <div className="flex flex-col gap-3">
       <div className="rounded-md border border-border bg-inset px-3 py-2 text-sm text-muted">
         <p>
-          This tab is the <strong className="font-medium text-fg">recipe</strong>. Execution happens on the board (or <strong className="font-medium text-fg">Test this stage</strong> below).
+          Each stage runs its prompt on Cursor/Claude and saves the <strong className="font-medium text-fg">answer</strong> as the variable. The next stage can read it (e.g. <span className="font-mono">{"{{agenda}}"}</span>). Optional input is extra context for this run only.
         </p>
-        <ul className="mt-2 list-disc space-y-1 pl-4 text-2xs">
-          <li>
-            <strong className="text-fg">Stage</strong> — one step in order (01, 02…). Tickets start in stage 01 even if it is an agent step.
-          </li>
-          <li>
-            <strong className="text-fg">What this stage does</strong> — “Agent runs” actually calls Claude/Cursor. “Team types this” is human input. Review/approve are gates.
-          </li>
-          <li>
-            <strong className="text-fg">Who runs it</strong> — Claude, Cursor, Studio, or CIS for this step only.
-          </li>
-          <li>
-            <strong className="text-fg">Variable</strong> — the output name. Any later prompt can use <span className="font-mono">{"{{agenda}}"}</span>. Same as a flow variable, not a test.
-          </li>
-          <li>
-            <strong className="text-fg">Test this stage</strong> — runs this step now on the open ticket (creates a scratch ticket if you have none). Execution → Test Claude is only a ping that the CLI works.
-          </li>
-        </ul>
       </div>
       <ul className="flex flex-col gap-2">
         {columns.map((col, i) => (
@@ -526,15 +511,37 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
               )}
             </p>
             {col.role === "prompt" || col.role === "plan" ? (
-              <Button
-                variant="primary"
-                size="sm"
-                className="mt-2"
-                disabled={testing !== null}
-                onClick={() => void runTest(col.id)}
-              >
-                {testing === col.id ? "Running…" : `Test this stage (${tickets.length ? "open ticket" : "scratch ticket"})`}
-              </Button>
+              <div className="mt-3 flex flex-col gap-2">
+                <label className="block">
+                  <span className="mb-1 block text-2xs text-muted">Optional input for this run ({"{{input}}"})</span>
+                  <Textarea
+                    value={stageInput[col.id] ?? ""}
+                    onChange={(e) => setStageInput((prev) => ({ ...prev, [col.id]: e.target.value }))}
+                    placeholder="Leave blank to run the prompt as-is."
+                  />
+                </label>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-fit"
+                  disabled={testing !== null}
+                  onClick={() => void runTest(col.id)}
+                >
+                  {testing === col.id ? "Running…" : "Run this stage"}
+                </Button>
+                {stageOut[col.id] ? (
+                  <pre
+                    className={cn(
+                      "max-h-64 overflow-auto whitespace-pre-wrap rounded-md border p-3 font-sans text-sm",
+                      stageOut[col.id]!.ok ? "border-border bg-inset text-fg" : "border-danger bg-danger/5 text-danger",
+                    )}
+                  >
+                    {stageOut[col.id]!.ok
+                      ? `${stageOut[col.id]!.variable ? `{{${stageOut[col.id]!.variable}}}\n\n` : ""}${stageOut[col.id]!.text || "(empty)"}`
+                      : stageOut[col.id]!.error || stageOut[col.id]!.text || "Failed"}
+                  </pre>
+                ) : null}
+              </div>
             ) : null}
           </li>
         ))}

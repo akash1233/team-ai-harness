@@ -24,7 +24,7 @@ import {
   patchActiveFlow,
   writeFlowColumns,
 } from "./team-config";
-import { harvestVars } from "./flow-context";
+import { harvestVars, outputVarName } from "./flow-context";
 import { promptIdForColumn, resolveStagePrompt } from "./prompts";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
@@ -77,7 +77,7 @@ type BoardState = {
   moveColumn: (id: string, dir: -1 | 1) => void;
   addColumn: () => void;
   removeColumn: (id: string) => void;
-  testStage: (columnId: string) => Promise<void>;
+  testStage: (columnId: string, extraInput?: string) => Promise<{ ok: boolean; text: string; error?: string; variable?: string }>;
   addMember: (member: Omit<TeamMember, "id">) => void;
   updateMember: (id: string, patch: Partial<Omit<TeamMember, "id">>) => void;
   removeMember: (id: string) => void;
@@ -769,29 +769,47 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     get().persist();
   },
 
-  testStage: async (columnId) => {
+  testStage: async (columnId, extraInput) => {
     const col = columnById(columnId, get().config.columns);
-    if (!col) return;
+    if (!col) return { ok: false, text: "", error: "Unknown stage" };
     const flowId = get().config.activeFlowId;
     let ticket =
-      get().tickets.find((t) => t.id === get().selectedId) ??
+      get().tickets.find((t) => t.id === get().selectedId && (t.flowId || DISCOVERY_FLOW_ID) === flowId) ??
       get().tickets.find((t) => (t.flowId || DISCOVERY_FLOW_ID) === flowId);
     if (!ticket) {
       const id = get().addTicket({
-        title: `Test · ${col.name}`,
-        description: "Scratch ticket so this stage can run.",
+        title: col.name,
+        description: extraInput?.trim() || "",
       });
       ticket = get().tickets.find((t) => t.id === id);
     }
-    if (!ticket) return;
+    if (!ticket) return { ok: false, text: "", error: "Could not create a run" };
+    if (extraInput?.trim()) {
+      get().updateTicket(ticket.id, {
+        vars: { ...ticket.vars, input: extraInput.trim() },
+      });
+    }
     if (ticket.columnId !== columnId) get().moveTicket(ticket.id, columnId);
-    get().toggleSettings(false);
-    if (col.role === "collect-input" || col.role === "terminal") return;
+    if (col.role === "collect-input" || col.role === "terminal") {
+      return { ok: false, text: "", error: "This stage is not an agent run" };
+    }
     if (col.role === "review" || col.role === "approve") {
       get().approve(ticket.id);
-      return;
+      return { ok: true, text: "Approved", variable: outputVarName(col) };
     }
     await get().runTicket(ticket.id);
+    const after = get().tickets.find((t) => t.id === ticket!.id);
+    const variable = outputVarName(col);
+    if (!after) return { ok: false, text: "", error: "Ticket disappeared" };
+    if (after.status === "blocked") {
+      return { ok: false, text: after.blockedReason || "", error: after.blockedReason, variable };
+    }
+    const text =
+      (variable && after.vars?.[variable]) ||
+      after.outputs[col.id] ||
+      after.liveLog ||
+      "";
+    return { ok: Boolean(text.trim()), text, variable };
   },
 
   addMember: (member) => {

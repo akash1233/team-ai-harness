@@ -78,6 +78,21 @@ export function stripAnsi(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
 }
 
+export function stageOutputFromLog(log: string): string {
+  return stripAnsi(log)
+    .split("\n")
+    .filter(
+      (l) =>
+        !/^\[kindling\]/i.test(l) &&
+        !/^cursor-retrieval:/i.test(l) &&
+        !/^nvm is not compatible/i.test(l) &&
+        !/^Run `unset/i.test(l) &&
+        !/^Kindling /i.test(l),
+    )
+    .join("\n")
+    .trim();
+}
+
 export function resolveCursorModel(raw?: string): string {
   const m = (raw || "").trim();
   if (!m || /^composer-1(\.|$)/i.test(m) || m === "composer-1") return "auto";

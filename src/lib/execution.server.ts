@@ -10,6 +10,7 @@ import {
   runAgentProcess,
   runProcess,
   sessionShouldStop,
+  stageOutputFromLog,
   startInteractiveSession,
   startMacSession,
   tryCursorChatId,
@@ -247,7 +248,8 @@ async function invokeCli(
   );
   if (!exec.fullAgentMode) flags = withoutFullAgentMode(flags);
   if (kind === "cursor") flags = withCursorWorkspace(flags, cwd);
-  const longStage = Boolean(exec.runInTerminal) && !printMode && process.platform === "darwin";
+  const longStage =
+    Boolean(exec.runInTerminal) && !printMode && Boolean(exec.fullAgentMode) && process.platform === "darwin";
   if (longStage) {
     flags = toInteractiveArgs(flags);
     if (kind === "claude" && !flags.includes("--session-id")) {
@@ -279,10 +281,10 @@ async function invokeCli(
     inTerminal: Boolean(exec.runInTerminal),
     fullAgent: Boolean(exec.fullAgentMode),
   });
-  const body = (raw.out || raw.err).trim();
-  const live = raw.via === "terminal" && body.length > 40;
-  if ((raw.code === 0 && raw.out.trim()) || live) {
-    return { ok: true, text: raw.out || body, via: raw.via === "terminal" ? `${via} Terminal` : via };
+  const body = stageOutputFromLog(raw.out || raw.err);
+  const live = raw.via === "terminal" && body.length > 0;
+  if ((raw.code === 0 && body) || live) {
+    return { ok: true, text: body, via: raw.via === "terminal" ? `${via} Terminal` : via };
   }
   return {
     ok: false,
@@ -293,7 +295,7 @@ async function invokeCli(
 }
 
 async function callLocalCli(exec: ExecutionConfig, prompt: string, kind: "cursor" | "claude"): Promise<ModelCall> {
-  const result = await invokeCli(exec, kind, prompt);
+  const result = await invokeCli(exec, kind, prompt, [], undefined, !exec.fullAgentMode);
   if (result.pending && result.sessionDir) {
     return { ok: true, text: result.text, via: result.via, sessionDir: result.sessionDir, pending: true };
   }

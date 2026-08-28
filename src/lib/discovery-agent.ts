@@ -159,9 +159,9 @@ The JSON must be valid. steps[].title must start with "Epic:" or "Story:". Honor
   }
 
   return {
-    max: 800,
-    system,
-    user: interpolate(`${header}\n\n{{context}}`, ctx),
+    max: 4000,
+    system: "You are a pipeline stage. Reply with the stage output only — the final answer, no preamble.",
+    user: interpolate(promptTemplate || col?.promptTemplate || "{{input}}\n{{context}}", ctx),
   };
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ensurePrintMode, explainCliFailure, isNoiseLog, resolveCursorModel, toInteractiveArgs, withCursorWorkspace, withoutFullAgentMode, withNonInteractiveFlags } from "./cli-session.ts";
+import { ensurePrintMode, explainCliFailure, isNoiseLog, resolveCursorModel, stageOutputFromLog, toInteractiveArgs, withCursorWorkspace, withoutFullAgentMode, withNonInteractiveFlags } from "./cli-session.ts";
 
 test("Cursor print mode does not add --trust or -f", () => {
   assert.deepEqual(withNonInteractiveFlags("cursor", ["-p", "--output-format", "text"]), [
@@ -47,6 +47,11 @@ test("composer-1 remaps to auto", () => {
 
 test("cursor gets --workspace", () => {
   assert.deepEqual(withCursorWorkspace(["-p"], "/tmp/repo"), ["--workspace", "/tmp/repo", "-p"]);
+});
+
+test("stageOutputFromLog drops kindling noise", () => {
+  const log = `[kindling] starting\nHello agenda\n[kindling] exit 0\n`;
+  assert.equal(stageOutputFromLog(log), "Hello agenda");
 });
 
 test("retrieval-only log is noise", () => {

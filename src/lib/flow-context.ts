@@ -55,6 +55,8 @@ export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, s
     grill: "",
     plan: "",
     jira: "",
+    repo: "",
+    input: ticket.vars?.input ?? "",
     prev: "",
     ...ticket.outputs,
     ...ticket.vars,

@@ -505,14 +505,6 @@ export async function runModel(opts: {
   return cost(await callLocalCli(exec, prompt, kind));
 }
 
-async function runCliRaw(
-  bin: string,
-  args: string[],
-  timeoutMs: number,
-): Promise<{ code: number | null; out: string; err: string }> {
-  return runProcess(bin, args, timeoutMs, process.cwd());
-}
-
 type LocatedCli = {
   kind: "cursor" | "claude";
   bin: string;
@@ -596,15 +588,28 @@ async function pingAgent(
   };
 }
 
-async function probeMcp(kind: "cursor" | "claude", located: LocatedCli, server?: string): Promise<SetupCheck[]> {
+async function probeMcp(
+  kind: "cursor" | "claude",
+  located: LocatedCli,
+  exec: ExecutionConfig,
+  server?: string,
+): Promise<SetupCheck[]> {
   const via = kind === "claude" ? "Claude" : "Cursor";
   if (!located.found) {
     return [{ ok: false, label: `${via} MCP`, detail: `${via} CLI is not installed — cannot list MCP servers.` }];
   }
-  const list = await runCliRaw(located.found.path, ["mcp", "list"], 20000);
+  const timeoutMs = exec.runInTerminal ? 90000 : 25000;
+  const list = await runAgentProcess({
+    bin: located.found.path,
+    args: ["mcp", "list"],
+    cwd: workspaceOf(exec),
+    timeoutMs,
+    inTerminal: Boolean(exec.runInTerminal),
+  });
   const text = (list.out || list.err).slice(0, 1200);
   const checks: SetupCheck[] = [];
-  if (list.code !== 0 && !text) {
+  const live = list.via === "terminal" && text.length > 10;
+  if (list.code !== 0 && !text && !live) {
     checks.push({
       ok: false,
       label: `${via} MCP list`,
@@ -615,18 +620,25 @@ async function probeMcp(kind: "cursor" | "claude", located: LocatedCli, server?:
   const failed = /✘|Failed to connect/i.test(text);
   const none = !text.trim() || /no mcp servers|none configured|0 servers/i.test(text);
   checks.push({
-    ok: list.code === 0 && !failed,
-    label: `${via} MCP list`,
+    ok: (list.code === 0 || live) && !failed,
+    label: `${via} MCP list${exec.runInTerminal ? " · Terminal" : ""}`,
     detail: none ? "No MCP servers configured." : text || `exit ${list.code}`,
   });
   const name = server?.trim();
   if (name) {
-    const get = await runCliRaw(located.found.path, ["mcp", "get", name], 20000);
+    const get = await runAgentProcess({
+      bin: located.found.path,
+      args: ["mcp", "get", name],
+      cwd: workspaceOf(exec),
+      timeoutMs,
+      inTerminal: Boolean(exec.runInTerminal),
+    });
     const body = (get.out || get.err).slice(0, 800);
     const issue = /Issue:|Failed to connect|✘/i.test(body);
+    const got = get.via === "terminal" && body.length > 10;
     checks.push({
-      ok: get.code === 0 && !issue,
-      label: `${via} MCP get ${name}`,
+      ok: (get.code === 0 || got) && !issue,
+      label: `${via} MCP get ${name}${exec.runInTerminal ? " · Terminal" : ""}`,
       detail: body || `exit ${get.code}`,
     });
   }
@@ -745,7 +757,14 @@ export async function probeSetup(
   } else if (options?.mcp && (step.kind === "cursor" || step.kind === "claude")) {
     const located = await locateCli(step.kind, exec);
     pushCliChecks(checks, located);
-    checks.push(...(await probeMcp(step.kind, located, options.mcpServer)));
+    checks.push(...(await probeMcp(step.kind, located, exec, options.mcpServer)));
+    if (mode === "run" && located.found) {
+      const mcpPrompt =
+        prompt && prompt !== "Reply with exactly: pong"
+          ? prompt
+          : "List the MCP servers and tools you have. Name each one. If a server needs auth, say so.";
+      checks.push(await pingAgent(located, exec, mcpPrompt));
+    }
   } else if (step.target === "remote") {
     const remoteUrl = (step.kind === "claude" ? exec.claudeRemoteUrl : exec.cursorRemoteUrl).trim();
     checks.push({

@@ -746,7 +746,7 @@ function ExecutionTab() {
         data: {
           execution: exec,
           stepAgent,
-          mode: extra?.mcp || connectOnly ? "connect" : "run",
+          mode: connectOnly ? "connect" : "run",
           prompt,
           mcp: extra?.mcp,
           mcpServer,
@@ -847,8 +847,9 @@ function ExecutionTab() {
       <section className="flex flex-col gap-3 rounded-md border border-border p-3">
         <h3 className="text-sm font-medium">MCP</h3>
         <p className="text-2xs text-muted">
-          Connectivity of MCP servers the CLI can see. Runs <span className="font-mono">claude mcp list</span> or{" "}
-          <span className="font-mono">agent mcp list</span>. Optional name runs <span className="font-mono">mcp get</span>.
+          Same as the agent test: opens Terminal as a live session and captures the log. Connectivity-only runs{" "}
+          <span className="font-mono">mcp list</span> (and <span className="font-mono">mcp get</span> if you name a server).
+          Unchecked, it then asks the agent to use those MCP tools with your test prompt.
         </p>
         <Field label="MCP server name (optional)">
           <Input

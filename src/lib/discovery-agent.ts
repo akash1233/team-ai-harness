@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { ExecutionConfig, GrillQuestion, Plan, SlackPost, StepAgent, TeamDoc, Ticket, JiraIssue } from "./types";
-import { formatGrillRecord } from "./grill";
+import { buildContext, interpolate } from "./flow-context";
 import {
   FILE_JIRA_COLUMN_ID,
   FRY_COLUMN_ID,
@@ -90,25 +90,18 @@ function buildPrompt(
   docs?: TeamDoc[],
 ): { system: string; user: string; max: number } {
   const col = columnById(columnId);
-  const system = promptTemplate || col?.promptTemplate || "";
-  const ideation =
-    ticket.outputs.ideation ||
-    [
-      ticket.slackChannel ? `Slack channel: #${ticket.slackChannel.replace(/^#+/, "")}` : "",
-      ticket.slackChannelId ? `Channel ID: ${ticket.slackChannelId}` : "",
-      ticket.slackMembers ? `Team members: ${ticket.slackMembers}` : "",
-      ticket.ideationNotes,
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-  const header = `Jira ${ticket.key}: ${ticket.title}\n${ticket.description}\nLabels: ${ticket.labels.join(", ") || "none"}`;
+  const ctx = buildContext(ticket, docs);
+  const system = interpolate(promptTemplate || col?.promptTemplate || "", ctx) || "Produce a concise operator-facing result.";
+  const header = interpolate(
+    `Jira {{ticket.key}}: {{ticket.title}}\n{{ticket.description}}\nLabels: {{ticket.labels}}`,
+    ctx,
+  );
 
   if (columnId === PREP_AGENDA_COLUMN_ID) {
     return {
       max: 1100,
       system,
-      user: `${header}\n\nIdeation:\n${ideation || "(none)"}\n\nWrite the agenda now.`,
+      user: interpolate(`${header}\n\nBrief:\n{{brief}}\n\nWrite the agenda now.`, ctx),
     };
   }
 
@@ -116,40 +109,42 @@ function buildPrompt(
     return {
       max: 1400,
       system,
-      user: `${header}\n\nIdeation:\n${ideation}\n\nTranscript:\n${ticket.transcript || ticket.outputs.transcript || "(none)"}\n\nWrite the spec using the template in the system prompt.`,
+      user: interpolate(
+        `${header}\n\nBrief:\n{{brief}}\n\nNotes:\n{{transcript}}\n\nWrite the spec using the template in the system prompt.`,
+        ctx,
+      ),
     };
   }
 
   if (columnId === FRY_COLUMN_ID) {
-    const rounds = formatGrillRecord(ticket);
     const phase =
       grillSubmit || ticket.grillRounds.some((r) => r.submitted)
         ? "The team answered the last round. Either ask the next frontier against the spec, or if the tree is settled, set frontierEmpty true and write conclusions planning must honor."
         : "Start round 1. Grill the Synthesize spec. Ask the whole frontier. One recommended answer per question.";
-    const docBlock = (docs ?? [])
-      .map((d) => `### ${d.title} (${d.kind})\n${d.body}`)
-      .join("\n\n");
     return {
       max: 1100,
       system: `${system}
 
-${docBlock}
+${ctx.docs || ""}
 
 Return ONLY a JSON object in a json fence with shape:
 {"frontierEmpty": boolean, "questions": [{"n": 1, "question": "...", "recommended": "...", "source": "spec"}], "conclusions": "markdown if frontierEmpty"}
 3–6 questions per round. No interview small talk.`,
-      user: `${header}
+      user: interpolate(
+        `${header}
 
 ## Spec from Synthesize (source of truth)
-${ticket.outputs.synthesize || "(missing — grill the Jira problem anyway, then tell the team to run Synthesize)"}
+{{spec}}
 
 ## Transcript (only if the spec is silent)
-${ticket.transcript || "(none)"}
+{{transcript}}
 
 ## Prior grill
-${rounds || "(none)"}
+{{grill}}
 
 ${phase}`,
+        ctx,
+      ),
     };
   }
 
@@ -158,14 +153,17 @@ ${phase}`,
       max: 1600,
       system: `${system}
 The JSON must be valid. steps[].title must start with "Epic:" or "Story:". Honor Grill Me answers as binding decisions.`,
-      user: `${header}\n\nIdeation:\n${ideation}\n\nSynthesis:\n${ticket.outputs.synthesize || ""}\n\nGrill Me (team answers):\n${formatGrillRecord(ticket) || ticket.outputs.fry || ""}\n\nEmit ${PLAN_JSON_START} then JSON then ${PLAN_JSON_END}. A short prose summary may precede the fence.`,
+      user: interpolate(
+        `${header}\n\nBrief:\n{{brief}}\n\nSpec:\n{{spec}}\n\nGrill Me (team answers):\n{{grill}}\n\nEmit ${PLAN_JSON_START} then JSON then ${PLAN_JSON_END}. A short prose summary may precede the fence.`,
+        ctx,
+      ),
     };
   }
 
   return {
     max: 800,
-    system: system || "Produce a concise operator-facing result.",
-    user: header,
+    system,
+    user: interpolate(`${header}\n\n{{context}}`, ctx),
   };
 }
 
@@ -190,7 +188,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
           blocked: "no Slack channel in Ideation input",
         };
       }
-      const agenda = ticket.outputs["prep-agenda"] || "(no agenda)";
+      const agenda = ticket.vars?.agenda || ticket.outputs["prep-agenda"] || "(no agenda)";
       const ts = `${Math.floor(Date.now() / 1000)}.${String(Date.now() % 1000).padStart(3, "0")}000`;
       const channelId = ticket.slackChannelId || "C0BQMKFR519";
       const text = `Posted to #${channel} (${channelId}) ts=${ts}\n\n${agenda}`;

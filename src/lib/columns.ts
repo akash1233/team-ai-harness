@@ -84,7 +84,13 @@ Do not send Slack. Do not create Jira issues. Agenda document only.`,
     agent: "cursor",
     promptTemplate: `Turn ideation, the Jira issue, and the meeting transcript into a spec.
 Cover: problem, solution, user stories, implementation decisions, testing decisions, out of scope.
-Do not interview. Do not create Jira issues.`,
+Do not interview. Do not create Jira issues.
+
+Brief:
+{{brief}}
+
+Notes:
+{{transcript}}`,
   },
   {
     id: PREVIEW_SYNTHESIZE_COLUMN_ID,
@@ -105,7 +111,13 @@ Do not interview. Do not create Jira issues.`,
     promptTemplate: `Interview relentlessly as a design tree against the Synthesize spec.
 Each round, ask the whole frontier: numbered questions, each with a recommended answer.
 The team answers. Wait for those answers before the next round.
-When the frontier is empty, emit conclusions, remaining risks, and decisions Write plan must honor.`,
+When the frontier is empty, emit conclusions, remaining risks, and decisions Write plan must honor.
+
+Spec:
+{{spec}}
+
+Prior grill:
+{{grill}}`,
   },
   {
     id: PREVIEW_FRY_COLUMN_ID,
@@ -124,6 +136,14 @@ When the frontier is empty, emit conclusions, remaining risks, and decisions Wri
     enabled: true,
     agent: "claude",
     promptTemplate: `Turn the Jira problem, synthesis, and Fryme output into a Jira backlog plan: epics and stories only. No implementation.
+Honor Grill Me answers as binding decisions.
+
+Spec:
+{{spec}}
+
+Grill:
+{{grill}}
+
 Emit ${PLAN_JSON_START} … ${PLAN_JSON_END} with summary, findings, scope, outOfScope, risks, and steps (title like "Epic: …" or "Story: …").`,
   },
   {
@@ -189,3 +209,29 @@ export function nextColumnId(
 export const PIPELINE_IDS = COLUMNS.filter((c) => c.id !== BLOCKED_COLUMN_ID).map(
   (c) => c.id,
 );
+
+const OUTPUT_KEYS: Record<string, string> = {
+  [IDEATION_COLUMN_ID]: "brief",
+  [PREP_AGENDA_COLUMN_ID]: "agenda",
+  [SEND_SLACK_COLUMN_ID]: "slack_post",
+  [TRANSCRIPT_COLUMN_ID]: "transcript",
+  [SYNTHESIZE_COLUMN_ID]: "spec",
+  [FRY_COLUMN_ID]: "grill",
+  [WRITE_PLAN_COLUMN_ID]: "plan",
+  [FILE_JIRA_COLUMN_ID]: "jira",
+};
+
+for (const col of COLUMNS) {
+  if (!col.outputKey && OUTPUT_KEYS[col.id]) col.outputKey = OUTPUT_KEYS[col.id];
+}
+
+export const DISCOVERY_FLOW_ID = "flow-discovery";
+export const QUICK_SPEC_FLOW_ID = "flow-quick-spec";
+
+export function cloneColumns(ids?: string[]): WorkflowColumn[] {
+  if (!ids) return COLUMNS.map((c) => ({ ...c }));
+  return ids
+    .map((id) => COLUMNS.find((c) => c.id === id))
+    .filter((c): c is WorkflowColumn => Boolean(c))
+    .map((c) => ({ ...c }));
+}

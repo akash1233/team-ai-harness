@@ -16,6 +16,7 @@ export function NewTicketDialog({
   const tickets = useBoardStore((s) => s.tickets);
   const addTicket = useBoardStore((s) => s.addTicket);
   const prefix = useBoardStore((s) => s.config.jiraPrefix);
+  const flowName = useBoardStore((s) => s.config.workflowName);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const preview = nextKey(tickets.map((t) => t.key), prefix);
@@ -38,7 +39,7 @@ export function NewTicketDialog({
             <div>
               <Dialog.Title className="font-serif text-xl font-medium tracking-tight">New ticket</Dialog.Title>
               <Dialog.Description className="text-sm text-muted">
-                Lands in the first collect stage as {preview}.
+                Lands on {flowName} in the first collect stage as {preview}.
               </Dialog.Description>
             </div>
             <Dialog.Close className="rounded-sm p-1 text-subtle hover:text-fg">

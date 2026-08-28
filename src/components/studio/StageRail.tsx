@@ -1,5 +1,6 @@
 import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
+import { DISCOVERY_FLOW_ID } from "@/lib/columns";
 import { resolveStep, shortAgent } from "@/lib/agents";
 
 export function StageRail() {
@@ -9,6 +10,8 @@ export function StageRail() {
   const setActiveStage = useBoardStore((s) => s.setActiveStage);
   const moveTicket = useBoardStore((s) => s.moveTicket);
   const execution = useBoardStore((s) => s.config.execution);
+  const flowId = useBoardStore((s) => s.config.activeFlowId);
+  const inFlow = tickets.filter((t) => (t.flowId || DISCOVERY_FLOW_ID) === flowId);
 
   return (
     <nav
@@ -16,7 +19,7 @@ export function StageRail() {
       className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-2 md:h-full md:w-56 md:flex-col md:overflow-y-auto md:border-r md:border-b-0 md:px-3 md:py-4"
     >
       {columns.map((col, i) => {
-        const count = tickets.filter((t) => t.columnId === col.id).length;
+        const count = inFlow.filter((t) => t.columnId === col.id).length;
         const active = col.id === activeStageId;
         const agent =
           col.agent && col.agent !== "inherit" ? shortAgent(resolveStep(col, execution).kind) : null;

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { columnById } from "@/lib/columns";
+import { mentionedKeys, outputVarName } from "@/lib/flow-context";
 import { channelLabel, formatSpend } from "@/lib/format";
 import { resolveStep } from "@/lib/agents";
 import { formatGrillRecord } from "@/lib/grill";
@@ -47,9 +48,44 @@ export function WorkPanel() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <p className="mb-4 text-sm leading-relaxed text-muted">{ticket.description}</p>
+        <FlowVars ticket={ticket} />
         <StepBody ticket={ticket} />
       </div>
     </aside>
+  );
+}
+
+function FlowVars({ ticket }: { ticket: Ticket }) {
+  const columns = useBoardStore((s) => s.config.columns);
+  const col = columnById(ticket.columnId, columns);
+  const writes = outputVarName(col);
+  const uses = mentionedKeys(col?.promptTemplate).filter((k) => !k.startsWith("ticket."));
+  const filled = Object.entries(ticket.vars ?? {}).filter(([, v]) => v.trim());
+  if (!writes && uses.length === 0 && filled.length === 0) return null;
+  return (
+    <section className="mb-4 rounded-md border border-border bg-inset px-3 py-2">
+      <p className="text-micro uppercase tracking-widest text-subtle">Flow variables</p>
+      {uses.length > 0 ? (
+        <p className="mt-1 text-2xs text-muted">
+          This stage reads {uses.map((k) => `{{${k}}}`).join(" ")}
+        </p>
+      ) : null}
+      {writes ? (
+        <p className="mt-1 text-2xs text-muted">
+          Writes <span className="font-mono text-fg">{`{{${writes}}}`}</span> for later stages
+        </p>
+      ) : null}
+      {filled.length > 0 ? (
+        <ul className="mt-2 flex flex-col gap-1">
+          {filled.map(([k, v]) => (
+            <li key={k} className="text-2xs">
+              <span className="font-mono text-fg">{k}</span>
+              <span className="ml-2 text-muted line-clamp-2">{v}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 

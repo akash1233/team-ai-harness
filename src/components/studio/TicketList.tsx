@@ -2,7 +2,7 @@ import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
-import { columnById } from "@/lib/columns";
+import { columnById, DISCOVERY_FLOW_ID } from "@/lib/columns";
 import { formatSpend } from "@/lib/format";
 import { resolveStep } from "@/lib/agents";
 
@@ -14,7 +14,9 @@ export function TicketList() {
   const select = useBoardStore((s) => s.select);
   const runColumn = useBoardStore((s) => s.runColumn);
   const col = columnById(activeStageId, config.columns);
-  const inStage = tickets.filter((t) => t.columnId === activeStageId);
+  const inStage = tickets.filter(
+    (t) => t.columnId === activeStageId && (t.flowId || DISCOVERY_FLOW_ID) === config.activeFlowId,
+  );
   const runnable =
     col &&
     (col.role === "prompt" || col.role === "plan" || col.role === "review" || col.role === "approve");

@@ -1,9 +1,11 @@
 import type { AgentResponse, Ticket } from "./types";
 import {
+  DISCOVERY_FLOW_ID,
   FRY_COLUMN_ID,
   IDEATION_COLUMN_ID,
   PREP_AGENDA_COLUMN_ID,
   PREVIEW_AGENDA_COLUMN_ID,
+  QUICK_SPEC_FLOW_ID,
   SEND_SLACK_COLUMN_ID,
   SYNTHESIZE_COLUMN_ID,
   TRANSCRIPT_COLUMN_ID,
@@ -110,7 +112,7 @@ Sana ingest, Conduit, GitHub PRs, Main XO execute, rewriting prompts from the mo
 Fryme must not re-derive storage vs Jira-field — registry + pin is decided. Remaining grill: authz, immutable vs mutable versions, and whether Jira gets a pointer field.`;
 
 export function createSampleTickets(): Ticket[] {
-  return [
+  const rows: Array<Omit<Ticket, "flowId" | "vars"> & Partial<Pick<Ticket, "flowId" | "vars">>> = [
     {
       id: "t-x2-698",
       key: "X2-698",
@@ -229,7 +231,37 @@ Record the full meeting (transcript ingest is manual for now).`,
       jiraCreated: [],
       createdAt: iso(12, 5),
     },
+    {
+      id: "t-x2-440",
+      key: "X2-440",
+      title: "Kill-switch for runaway grill rounds",
+      description:
+        "A grill can loop if the model never sets frontierEmpty. Need a one-click stop that still keeps answers for planning.",
+      labels: ["discovery"],
+      columnId: IDEATION_COLUMN_ID,
+      flowId: QUICK_SPEC_FLOW_ID,
+      status: "idle",
+      spend: 0,
+      runId: "f3aa91c0-2b14-4e7a-9c01-8d4e6b77c210",
+      slackChannel: "",
+      slackChannelId: "",
+      slackMembers: "",
+      ideationNotes: "",
+      transcript: "",
+      outputs: {},
+      agentResponses: [],
+      grillRounds: [],
+      fryComplete: false,
+      plan: null,
+      jiraCreated: [],
+      createdAt: iso(13, 20),
+    },
   ];
+  return rows.map((t) => ({
+    ...t,
+    flowId: t.flowId ?? DISCOVERY_FLOW_ID,
+    vars: t.vars ?? {},
+  }));
 }
 
 export const STORAGE_KEY = "pit-studio-v2";

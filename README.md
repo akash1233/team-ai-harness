@@ -66,6 +66,25 @@ Then:
 
 Optional: point **Local HTTP sidecar** at an OpenAI-compatible server (`http://127.0.0.1:11434/v1`) instead of spawning a CLI.
 
+## Flows and variables
+
+A workspace can run **multiple flows** (Discovery, Quick spec, or your own). Switch them in the header or **Team → Flows**. Tickets stay on the flow they were created in.
+
+Each stage publishes a named value. Later prompts interpolate it:
+
+| Token | Source |
+| --- | --- |
+| `{{brief}}` | Brief / ideation |
+| `{{agenda}}` | Agenda |
+| `{{transcript}}` | Meeting notes |
+| `{{spec}}` | Synthesize |
+| `{{grill}}` | Grill Me answers |
+| `{{plan}}` | Backlog plan |
+| `{{prev}}` | Previous stage output |
+| `{{ticket.title}}` | Ticket fields |
+
+With **Keep running agent stages** on (default), a successful run skips review gates and starts the next agent until it hits notes, Grill questions, or sign-off.
+
 ## Per-stage agents
 
 **Team → Pipeline** pins the agent on each runnable stage. **Inherit** uses the workspace default.

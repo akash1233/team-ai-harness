@@ -1,17 +1,26 @@
 import { create } from "zustand";
-import type { GrillQuestion, GrillRound, TeamConfig, TeamDoc, TeamMember, Ticket, WorkflowColumn } from "./types";
+import type { Flow, GrillQuestion, GrillRound, TeamConfig, TeamDoc, TeamMember, Ticket, WorkflowColumn } from "./types";
 import {
   BLOCKED_COLUMN_ID,
+  cloneColumns,
+  DISCOVERY_FLOW_ID,
   DONE_COLUMN_ID,
   FRY_COLUMN_ID,
   IDEATION_COLUMN_ID,
   nextColumnId,
   TRANSCRIPT_COLUMN_ID,
-  WRITE_PLAN_COLUMN_ID,
   columnById,
 } from "./columns";
 import { createSampleTickets, STORAGE_KEY } from "./sample-data";
-import { createDefaultTeam, mergeTeamConfig } from "./team-config";
+import {
+  activeFlow,
+  applyActiveFlow,
+  createDefaultTeam,
+  mergeTeamConfig,
+  patchActiveFlow,
+  writeFlowColumns,
+} from "./team-config";
+import { harvestVars } from "./flow-context";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
 import { runDiscoveryAgent } from "./discovery-agent";
@@ -55,6 +64,12 @@ type BoardState = {
   removeMember: (id: string) => void;
   addLabel: (label: string) => void;
   removeLabel: (label: string) => void;
+  continueAfter: (id: string) => Promise<void>;
+  setActiveFlow: (id: string) => void;
+  addFlow: () => void;
+  duplicateFlow: (id?: string) => void;
+  removeFlow: (id: string) => void;
+  patchFlow: (patch: Partial<Flow>) => void;
 };
 
 function persistNow(
@@ -84,6 +99,14 @@ function withTicket(tickets: Ticket[], id: string, patch: Partial<Ticket> | ((t:
   });
 }
 
+function stampTicket(t: Ticket, flowId = DISCOVERY_FLOW_ID): Ticket {
+  return {
+    ...t,
+    flowId: t.flowId || flowId,
+    vars: t.vars ?? {},
+  };
+}
+
 export const useBoardStore = create<BoardState>((set, get) => ({
   tickets: createSampleTickets(),
   config: createDefaultTeam(),
@@ -105,7 +128,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         if (Array.isArray(parsed.tickets) && parsed.tickets.length > 0) {
           const config = parsed.config ? mergeTeamConfig(parsed.config) : createDefaultTeam();
           set({
-            tickets: parsed.tickets,
+            tickets: parsed.tickets.map((t) => stampTicket(t, config.activeFlowId)),
             config,
             selectedId: parsed.selectedId ?? null,
             activeStageId: parsed.activeStageId ?? FRY_COLUMN_ID,
@@ -176,6 +199,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       description: description.trim(),
       labels: config.labels[0] ? [config.labels[0]] : ["discovery"],
       columnId: start,
+      flowId: config.activeFlowId,
       status: "idle",
       spend: 0,
       runId,
@@ -185,6 +209,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       ideationNotes: "",
       transcript: "",
       outputs: {},
+      vars: {},
       agentResponses: [],
       grillRounds: [],
       fryComplete: false,
@@ -286,9 +311,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           tickets: withTicket(get().tickets, id, (t) => ({
             ...t,
             outputs: { ...t.outputs, [IDEATION_COLUMN_ID]: output },
+            vars: harvestVars({ ...t, vars: t.vars ?? {} }, col, output),
           })),
         });
-        get().advance(id);
+        await get().continueAfter(id);
         return;
       }
       if (col.id === TRANSCRIPT_COLUMN_ID) {
@@ -297,9 +323,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           tickets: withTicket(get().tickets, id, (t) => ({
             ...t,
             outputs: { ...t.outputs, [TRANSCRIPT_COLUMN_ID]: t.transcript },
+            vars: harvestVars({ ...t, vars: t.vars ?? {} }, col, t.transcript),
           })),
         });
-        get().advance(id);
+        await get().continueAfter(id);
         return;
       }
     }
@@ -368,6 +395,13 @@ export const useBoardStore = create<BoardState>((set, get) => ({
                   },
                 ]
               : t.grillRounds;
+          const body =
+            t.columnId === FRY_COLUMN_ID && !result.grill?.frontierEmpty ? "" : result.text;
+          const nextVars = {
+            ...(body ? harvestVars({ ...t, vars: t.vars ?? {} }, liveCol, body) : t.vars ?? {}),
+          };
+          if (result.plan) nextVars.plan = JSON.stringify(result.plan, null, 2);
+          if (result.grill?.frontierEmpty && result.text) nextVars.grill = result.text;
           return {
             ...t,
             status: "idle",
@@ -377,6 +411,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
               t.columnId === FRY_COLUMN_ID && !result.grill?.frontierEmpty
                 ? t.outputs
                 : { ...t.outputs, [t.columnId]: result.text },
+            vars: nextVars,
             agentResponses: [response, ...t.agentResponses],
             grillRounds,
             fryComplete: result.grill?.frontierEmpty ? true : t.fryComplete,
@@ -389,21 +424,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
       const after = get().tickets.find((t) => t.id === id);
       if (!after) return;
-
-      if (after.columnId === FRY_COLUMN_ID) {
-        if (after.fryComplete && get().config.autoAdvance) get().advance(id);
-        get().persist();
-        return;
-      }
-      if (!get().config.autoAdvance) {
-        get().persist();
-        return;
-      }
-      if (after.columnId === WRITE_PLAN_COLUMN_ID && after.plan) {
-        get().advance(id);
-        return;
-      }
-      get().advance(id);
+      await get().continueAfter(id);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Agent failed";
       get().block(id, message);
@@ -487,6 +508,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
                 ]
               : t.grillRounds;
           const conclusions = result.grill?.frontierEmpty ? result.text : t.outputs[FRY_COLUMN_ID];
+          const vars = { ...t.vars };
+          if (conclusions) vars.grill = conclusions;
           return {
             ...t,
             status: "idle",
@@ -494,12 +517,13 @@ export const useBoardStore = create<BoardState>((set, get) => ({
             grillRounds: nextRounds,
             fryComplete: Boolean(result.grill?.frontierEmpty),
             outputs: conclusions ? { ...t.outputs, [FRY_COLUMN_ID]: conclusions } : t.outputs,
+            vars,
             agentResponses: [response, ...t.agentResponses],
           };
         }),
       });
       const after = get().tickets.find((t) => t.id === id);
-      if (after?.fryComplete && get().config.autoAdvance) get().advance(id);
+      if (after) await get().continueAfter(id);
       else get().persist();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Grill failed";
@@ -508,17 +532,17 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   patchConfig: (patch) => {
-    set({ config: { ...get().config, ...patch } });
+    let config = { ...get().config, ...patch };
+    if (patch.autoAdvance !== undefined) {
+      config = patchActiveFlow(config, { autoAdvance: patch.autoAdvance });
+    }
+    set({ config });
     get().persist();
   },
 
   updateColumn: (id, patch) => {
-    set({
-      config: {
-        ...get().config,
-        columns: get().config.columns.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-      },
-    });
+    const columns = get().config.columns.map((c) => (c.id === id ? { ...c, ...patch } : c));
+    set({ config: writeFlowColumns(get().config, columns) });
     get().persist();
   },
 
@@ -533,7 +557,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     if (!a || !b) return;
     cols[i] = b;
     cols[j] = a;
-    set({ config: { ...get().config, columns: cols } });
+    set({ config: writeFlowColumns(get().config, cols) });
     get().persist();
   },
 
@@ -548,12 +572,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       enabled: true,
       custom: true,
       agent: "inherit",
-      promptTemplate: "Produce a concise operator-facing result for this stage.",
+      outputKey: id.replace(/[^a-zA-Z0-9]+/g, "_"),
+      promptTemplate:
+        "Produce a concise operator-facing result for this stage.\n\nPrevious:\n{{prev}}\n\n{{context}}",
     };
     const cols = [...get().config.columns];
     const doneAt = cols.findIndex((c) => c.id === DONE_COLUMN_ID);
     cols.splice(doneAt < 0 ? cols.length : doneAt, 0, col);
-    set({ config: { ...get().config, columns: cols } });
+    set({ config: writeFlowColumns(get().config, cols) });
     get().persist();
   },
 
@@ -561,7 +587,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const col = get().config.columns.find((c) => c.id === id);
     if (!col || col.locked) return;
     set({
-      config: { ...get().config, columns: get().config.columns.filter((c) => c.id !== id) },
+      config: writeFlowColumns(
+        get().config,
+        get().config.columns.filter((c) => c.id !== id),
+      ),
     });
     get().persist();
   },
@@ -638,6 +667,114 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   removeDoc: (id) => {
     set({ config: { ...get().config, docs: get().config.docs.filter((d) => d.id !== id) } });
+    get().persist();
+  },
+
+  continueAfter: async (id) => {
+    const flow = activeFlow(get().config);
+    const ticket = get().tickets.find((t) => t.id === id);
+    if (!ticket) return;
+    const col = columnById(ticket.columnId, get().config.columns);
+    if (col?.id === FRY_COLUMN_ID && !ticket.fryComplete) {
+      get().persist();
+      return;
+    }
+    if (!flow.autoAdvance) {
+      get().persist();
+      return;
+    }
+
+    let guard = 0;
+    while (guard++ < 24) {
+      const current = get().tickets.find((t) => t.id === id);
+      if (!current) return;
+      const nextId = nextColumnId(current.columnId, get().config.columns);
+      if (!nextId || nextId === current.columnId) {
+        get().persist();
+        return;
+      }
+      get().advance(id);
+      const moved = get().tickets.find((t) => t.id === id);
+      if (!moved) return;
+      const next = columnById(moved.columnId, get().config.columns);
+      if (!next || next.role === "terminal") {
+        get().persist();
+        return;
+      }
+      if (next.role === "review" && flow.autoRun) continue;
+      if (next.role === "collect-input" || next.role === "approve") {
+        get().persist();
+        return;
+      }
+      if (flow.autoRun && (next.role === "prompt" || next.role === "plan")) {
+        get().persist();
+        await get().runTicket(id);
+        return;
+      }
+      get().persist();
+      return;
+    }
+  },
+
+  setActiveFlow: (id) => {
+    const config = applyActiveFlow(get().config, id);
+    const start = config.columns.find((c) => c.enabled)?.id ?? config.columns[0]?.id;
+    set({
+      config,
+      selectedId: null,
+      activeStageId: start ?? get().activeStageId,
+    });
+    get().persist();
+  },
+
+  addFlow: () => {
+    const id = `flow-${uid()}`;
+    const flow: Flow = {
+      id,
+      name: "New flow",
+      description: "Custom pipeline. Stages publish {{variables}} for later steps.",
+      columns: cloneColumns(),
+      autoAdvance: true,
+      autoRun: true,
+    };
+    const config = applyActiveFlow({ ...get().config, flows: [...get().config.flows, flow] }, id);
+    const start = config.columns.find((c) => c.enabled)?.id ?? config.columns[0]?.id;
+    set({ config, selectedId: null, activeStageId: start ?? get().activeStageId });
+    get().persist();
+  },
+
+  duplicateFlow: (id) => {
+    const src = get().config.flows.find((f) => f.id === (id ?? get().config.activeFlowId)) ?? activeFlow(get().config);
+    const copy: Flow = {
+      ...src,
+      id: `flow-${uid()}`,
+      name: `${src.name} copy`,
+      columns: src.columns.map((c) => ({ ...c })),
+    };
+    const config = applyActiveFlow({ ...get().config, flows: [...get().config.flows, copy] }, copy.id);
+    const start = config.columns.find((c) => c.enabled)?.id ?? config.columns[0]?.id;
+    set({ config, selectedId: null, activeStageId: start ?? get().activeStageId });
+    get().persist();
+  },
+
+  removeFlow: (id) => {
+    const { config } = get();
+    if (config.flows.length <= 1) return;
+    const flows = config.flows.filter((f) => f.id !== id);
+    const nextId = config.activeFlowId === id ? flows[0]!.id : config.activeFlowId;
+    const next = applyActiveFlow({ ...config, flows }, nextId);
+    const start = next.columns.find((c) => c.enabled)?.id ?? next.columns[0]?.id;
+    set({
+      config: next,
+      tickets: get().tickets.filter((t) => t.flowId !== id),
+      selectedId: null,
+      activeStageId: start ?? get().activeStageId,
+    });
+    get().persist();
+  },
+
+  patchFlow: (patch) => {
+    set({ config: patchActiveFlow(get().config, patch) });
     get().persist();
   },
 }));

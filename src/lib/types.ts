@@ -105,9 +105,22 @@ export type WorkflowColumn = {
   promptTemplate?: string;
   promptId?: string;
   agent?: StepAgent;
+  /** Variable name this stage publishes, e.g. spec — usable later as {{spec}}. */
+  outputKey?: string;
   enabled: boolean;
   locked?: boolean;
   custom?: boolean;
+};
+
+export type Flow = {
+  id: string;
+  name: string;
+  description: string;
+  columns: WorkflowColumn[];
+  /** Move the ticket to the next stage after a successful run. */
+  autoAdvance: boolean;
+  /** Keep running agent stages, skipping review gates, until a human gate. */
+  autoRun: boolean;
 };
 
 export type TeamDoc = {
@@ -133,6 +146,8 @@ export type TeamConfig = {
   members: TeamMember[];
   labels: string[];
   columns: WorkflowColumn[];
+  flows: Flow[];
+  activeFlowId: string;
   docs: TeamDoc[];
   theme: ThemeId;
   density: DensityId;
@@ -148,6 +163,7 @@ export type Ticket = {
   description: string;
   labels: string[];
   columnId: string;
+  flowId: string;
   status: TicketStatus;
   blockedReason?: string;
   spend: number;
@@ -160,6 +176,8 @@ export type Ticket = {
   ideationNotes: string;
   transcript: string;
   outputs: Record<string, string>;
+  /** Named values published by completed stages. Prompts read these as {{name}}. */
+  vars: Record<string, string>;
   agentResponses: AgentResponse[];
   grillRounds: GrillRound[];
   fryComplete: boolean;

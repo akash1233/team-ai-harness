@@ -21,6 +21,7 @@ export function Studio() {
   const reset = useBoardStore((s) => s.reset);
   const activeMemberId = useBoardStore((s) => s.activeMemberId);
   const setActiveMember = useBoardStore((s) => s.setActiveMember);
+  const setActiveFlow = useBoardStore((s) => s.setActiveFlow);
   const [newOpen, setNewOpen] = useState(false);
 
   useEffect(() => {
@@ -44,7 +45,20 @@ export function Studio() {
           <span className="hidden h-6 w-1 rounded-full bg-accent sm:block" aria-hidden />
           <div className="min-w-0">
             <p className="font-serif text-lg leading-none tracking-tight">{config.name}</p>
-            <p className="text-micro uppercase tracking-widest text-subtle">{config.workflowName}</p>
+            <label className="mt-0.5 block">
+              <span className="sr-only">Flow</span>
+              <select
+                className="max-w-[11rem] truncate bg-transparent text-micro uppercase tracking-widest text-subtle"
+                value={config.activeFlowId}
+                onChange={(e) => setActiveFlow(e.target.value)}
+              >
+                {config.flows.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
         <div className="ml-auto flex items-center gap-1.5">

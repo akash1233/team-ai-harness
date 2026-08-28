@@ -9,7 +9,7 @@ import { createDefaultExecution, executionLabel } from "@/lib/team-config";
 import { AGENT_KINDS } from "@/lib/agents";
 import { testExecution } from "@/lib/discovery-agent";
 
-const TABS = ["Team", "Pipeline", "Prompts", "Docs", "Execution", "Look"] as const;
+const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Docs", "Execution", "Look"] as const;
 type Tab = (typeof TABS)[number];
 
 const ROLES: ColumnRole[] = ["collect-input", "prompt", "review", "plan", "approve", "terminal"];
@@ -65,6 +65,7 @@ export function TeamSettings() {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {tab === "Team" ? <TeamTab /> : null}
+          {tab === "Flows" ? <FlowsTab /> : null}
           {tab === "Pipeline" ? <PipelineTab /> : null}
           {tab === "Prompts" ? <PromptsTab /> : null}
           {tab === "Docs" ? <DocsTab /> : null}
@@ -203,6 +204,86 @@ function TeamTab() {
   );
 }
 
+function FlowsTab() {
+  const config = useBoardStore((s) => s.config);
+  const tickets = useBoardStore((s) => s.tickets);
+  const setActiveFlow = useBoardStore((s) => s.setActiveFlow);
+  const addFlow = useBoardStore((s) => s.addFlow);
+  const duplicateFlow = useBoardStore((s) => s.duplicateFlow);
+  const removeFlow = useBoardStore((s) => s.removeFlow);
+  const patchFlow = useBoardStore((s) => s.patchFlow);
+  const flow = config.flows.find((f) => f.id === config.activeFlowId) ?? config.flows[0];
+  if (!flow) return null;
+
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-sm text-muted">
+        A flow is a pipeline. Tickets stay on the flow they were created in. Agent stages publish named variables the next stage reads as {"{{spec}}"}, {"{{grill}}"}, {"{{prev}}"}.
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {config.flows.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => setActiveFlow(f.id)}
+            className={cn(
+              "h-11 rounded-md px-3 text-sm",
+              f.id === flow.id ? "bg-accent text-accent-fg" : "bg-inset text-muted hover:text-fg",
+            )}
+          >
+            {f.name}
+            <span className={cn("ml-2 font-mono text-micro", f.id === flow.id ? "text-accent-fg/80" : "text-subtle")}>
+              {tickets.filter((t) => t.flowId === f.id).length}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" size="md" onClick={() => addFlow()}>
+          <Plus className="size-4" />
+          New flow
+        </Button>
+        <Button variant="ghost" size="md" onClick={() => duplicateFlow(flow.id)}>
+          Duplicate
+        </Button>
+        <Button
+          variant="ghost"
+          size="md"
+          disabled={config.flows.length <= 1}
+          onClick={() => removeFlow(flow.id)}
+        >
+          Delete
+        </Button>
+      </div>
+      <Field label="Name">
+        <Input value={flow.name} onChange={(e) => patchFlow({ name: e.target.value })} />
+      </Field>
+      <Field label="What this flow does">
+        <Textarea rows={3} value={flow.description} onChange={(e) => patchFlow({ description: e.target.value })} />
+      </Field>
+      <label className="flex min-h-11 items-center gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={flow.autoAdvance}
+          onChange={(e) => patchFlow({ autoAdvance: e.target.checked })}
+        />
+        After a run, move the ticket to the next stage
+      </label>
+      <label className="flex min-h-11 items-center gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={flow.autoRun}
+          onChange={(e) => patchFlow({ autoRun: e.target.checked })}
+        />
+        Keep running agent stages (skip reviews) until a human gate — notes, grill answers, or sign-off
+      </label>
+      <p className="text-2xs text-muted">
+        Edit stages for <span className="text-fg">{flow.name}</span> on the Pipeline tab. Prompts may use {"{{brief}}"} {"{{spec}}"} {"{{grill}}"} {"{{plan}}"} {"{{transcript}}"} {"{{prev}}"} {"{{ticket.title}}"}.
+      </p>
+    </div>
+  );
+}
+
 function PipelineTab() {
   const columns = useBoardStore((s) => s.config.columns);
   const updateColumn = useBoardStore((s) => s.updateColumn);
@@ -213,7 +294,7 @@ function PipelineTab() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        Rename, hide, or reorder stages. Each runnable stage picks Cursor, Claude, Studio, or CIS. On a Mac, install those CLIs under Execution first. Inherit uses the workspace default.
+        Stages for the active flow. Each runnable stage publishes a variable the next step can read. Auto-run skips reviews until a human gate.
       </p>
       <ul className="flex flex-col gap-2">
         {columns.map((col, i) => (
@@ -249,6 +330,13 @@ function PipelineTab() {
                   </option>
                 ))}
               </select>
+              <Input
+                className="h-11 w-28"
+                placeholder="{{var}}"
+                value={col.outputKey ?? ""}
+                onChange={(e) => updateColumn(col.id, { outputKey: e.target.value.trim() })}
+                aria-label={`${col.label} variable`}
+              />
               <label className="flex h-11 items-center gap-2 px-2 text-sm">
                 <input
                   type="checkbox"
@@ -307,7 +395,7 @@ function PromptsTab() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        These templates are sent to the agent when you hit Run. Edits apply to the whole team workspace.
+        Templates go to the agent on Run. Use {"{{brief}}"}, {"{{spec}}"}, {"{{grill}}"}, {"{{plan}}"}, {"{{transcript}}"}, {"{{prev}}"}, {"{{ticket.title}}"} — filled from earlier stages on this ticket.
       </p>
       <div className="flex flex-wrap gap-1">
         {promptable.map((c) => (
@@ -717,7 +805,7 @@ function LookTab() {
           checked={config.autoAdvance}
           onChange={(e) => patchConfig({ autoAdvance: e.target.checked })}
         />
-        Auto-advance after a successful run
+        Auto-advance after a successful run (active flow)
       </label>
       <Button variant="ghost" size="md" onClick={() => resetTeam()}>
         Restore default team + sample tickets

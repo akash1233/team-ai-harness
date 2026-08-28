@@ -256,7 +256,7 @@ function FlowsTab() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        A flow is a pipeline. Tickets stay on the flow they were created in. Agent stages publish named variables the next stage reads as {"{{spec}}"}, {"{{grill}}"}, {"{{prev}}"}.
+        A flow is a pipeline. <strong className="font-medium text-fg">New flow</strong> starts blank (one empty stage). <strong className="font-medium text-fg">Duplicate</strong> copies the current one. Tickets stay on the flow they were created in.
       </p>
       <div className="flex flex-wrap gap-1">
         {config.flows.map((f) => (

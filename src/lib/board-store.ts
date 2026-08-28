@@ -4,7 +4,6 @@ import type { LinkedJira, LinkedRepo } from "./connectors";
 import { connectorVars, mergeConnectors } from "./connectors";
 import {
   BLOCKED_COLUMN_ID,
-  cloneColumns,
   DISCOVERY_FLOW_ID,
   DONE_COLUMN_ID,
   FRY_COLUMN_ID,
@@ -26,7 +25,7 @@ import {
   writeFlowColumns,
 } from "./team-config";
 import { harvestVars } from "./flow-context";
-import { promptIdForColumn, resolveStagePrompt, stampPromptRefs } from "./prompts";
+import { promptIdForColumn, resolveStagePrompt } from "./prompts";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
 import { extractGrill, extractPlan, runDiscoveryAgent } from "./discovery-agent";
@@ -1017,17 +1016,29 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   addFlow: () => {
     const id = `flow-${uid()}`;
+    const stageId = `stage-${uid("col")}`;
     const flow: Flow = {
       id,
       name: "New flow",
-      description: "Custom pipeline. Stages publish {{variables}} for later steps.",
-      columns: stampPromptRefs(cloneColumns()),
-      autoAdvance: true,
-      autoRun: true,
+      description: "",
+      columns: [
+        {
+          id: stageId,
+          name: "Stage 01",
+          label: "Stage 01",
+          role: "prompt",
+          rail: "run",
+          enabled: true,
+          custom: true,
+          agent: "inherit",
+          outputKey: "output",
+        },
+      ],
+      autoAdvance: false,
+      autoRun: false,
     };
     const config = applyActiveFlow({ ...get().config, flows: [...get().config.flows, flow] }, id);
-    const start = config.columns.find((c) => c.enabled)?.id ?? config.columns[0]?.id;
-    set({ config, selectedId: null, activeStageId: start ?? get().activeStageId });
+    set({ config, selectedId: null, activeStageId: stageId });
     get().persist();
   },
 

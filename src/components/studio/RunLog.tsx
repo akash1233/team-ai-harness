@@ -1,4 +1,5 @@
 import { cn } from "@/lib/cn";
+import { formatSpend } from "@/lib/format";
 import type { AgentResponse, WorkflowColumn } from "@/lib/types";
 
 function stageName(columnId: string, columns: WorkflowColumn[]) {
@@ -35,6 +36,14 @@ export function RunLog({
               </span>
               <span className="text-2xs text-muted">{stageName(r.columnId, columns)}</span>
               {r.via ? <span className="font-mono text-micro text-subtle">{r.via}</span> : null}
+              {typeof r.spend === "number" ? (
+                <span className="font-mono text-micro text-subtle">{formatSpend(r.spend)}</span>
+              ) : null}
+              {r.usage ? (
+                <span className="font-mono text-micro text-subtle">
+                  {r.usage.inputTokens}/{r.usage.outputTokens} tok{r.usage.estimated ? " est." : ""}
+                </span>
+              ) : null}
               <span className="ml-auto font-mono text-micro text-subtle">
                 {r.at.replace("T", " ").slice(11, 19)}
               </span>

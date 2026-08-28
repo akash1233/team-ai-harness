@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resolveStep, stepLabel, legacyDefaultAgent } from "./agents.ts";
+import { DEFAULT_PRICING } from "./pricing.ts";
 import type { ExecutionConfig } from "./types.ts";
 
 const exec: ExecutionConfig = {
@@ -20,6 +21,7 @@ const exec: ExecutionConfig = {
   cisTaskType: "aws-converse-v1",
   timeoutMs: 120000,
   demoFallbacks: true,
+  pricing: DEFAULT_PRICING,
 };
 
 test("inherit uses workspace default Cursor local", () => {

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
@@ -8,6 +8,9 @@ import type { AgentKind, AgentTarget, ColumnRole, DensityId, PipelineLayout, Ste
 import { createDefaultExecution, executionLabel } from "@/lib/team-config";
 import { AGENT_KINDS } from "@/lib/agents";
 import { testExecution } from "@/lib/discovery-agent";
+import { Field, Code } from "@/components/studio/settings/field";
+import { PricingFields } from "@/components/studio/settings/PricingFields";
+import { mergePricing } from "@/lib/pricing";
 
 const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Docs", "Execution", "Look"] as const;
 type Tab = (typeof TABS)[number];
@@ -554,14 +557,6 @@ function MacAgentHints() {
   );
 }
 
-function Code({ children }: { children: string }) {
-  return (
-    <pre className="mt-1 overflow-x-auto rounded-sm bg-inset px-2 py-2 font-mono text-2xs leading-relaxed text-fg">
-      {children}
-    </pre>
-  );
-}
-
 function ExecutionTab() {
   const config = useBoardStore((s) => s.config);
   const patchConfig = useBoardStore((s) => s.patchConfig);
@@ -745,6 +740,10 @@ function ExecutionTab() {
         </div>
       </section>
 
+      <PricingFields
+        pricing={exec.pricing ?? mergePricing()}
+        onChange={(pricing) => patch({ pricing })}
+      />
       <Field label="Timeout (ms)">
         <Input
           className="font-mono"
@@ -872,11 +871,3 @@ function LookTab() {
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-2xs text-muted">{label}</span>
-      {children}
-    </label>
-  );
-}

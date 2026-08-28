@@ -12,6 +12,7 @@ import {
   SYNTHESIZE_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
 } from "./columns";
+import { mergePricing } from "./pricing";
 import { legacyDefaultAgent } from "./agents";
 import { DEFAULT_DOCS } from "./grill-skill";
 import type { ExecutionConfig, Flow, TeamConfig, TeamDoc, TeamMember, WorkflowColumn } from "./types";
@@ -83,6 +84,7 @@ export function createDefaultExecution(): ExecutionConfig {
     cisTaskType: "aws-converse-v1",
     timeoutMs: 120000,
     demoFallbacks: true,
+    pricing: mergePricing(),
     provider: "local",
     localAgent: "cursor",
   };
@@ -142,6 +144,7 @@ export function mergeExecution(saved?: Partial<ExecutionConfig>): ExecutionConfi
   const merged = { ...d, ...saved };
   const fromLegacy = legacyDefaultAgent(saved);
   if (!saved?.defaultAgent && fromLegacy) merged.defaultAgent = fromLegacy;
+  merged.pricing = mergePricing(saved?.pricing);
   return merged;
 }
 

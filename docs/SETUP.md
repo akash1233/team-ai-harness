@@ -67,7 +67,7 @@ claude --version
 ### After install
 
 1. Stop the harness (`Ctrl+C`) and run `npm run dev` again in that same shell.
-2. **Team → Execution → Test setup**.
+2. **Settings → Execution → Test setup**.
 3. You want a path like `/Users/you/.local/bin/agent`, not “not on PATH”.
 4. Uncheck **Use demo text if the agent is offline**.
 
@@ -88,15 +88,19 @@ Copy [`.env.example`](../.env.example). Every `PIT_*` key overrides **Team → E
 | `PIT_PROMPT_ID` | Studio prompt id (`File → Copy Prompt ID`) |
 | `PIT_CIS_MODEL` | e.g. `anthropic.claude-haiku-4-5-20251001-v1:0` |
 | `PIT_DEMO_FALLBACKS` | `0` fail closed, `1` canned text when the agent is missing |
+| `PIT_CLAUDE_IN_USD_PER_MTOK` / `PIT_CLAUDE_OUT_USD_PER_MTOK` | Claude $ per million tokens (default 2 / 10) |
+| `PIT_CIS_IN_USD_PER_MTOK` / `PIT_CIS_OUT_USD_PER_MTOK` | CIS $ per million tokens (default 1 / 5) |
+| `PIT_CHARS_PER_TOKEN` | CLI token estimate (default 4) |
 
 Restart the dev server after changing env.
 
 ## First-run checklist
 
-1. Open the app → **Team → Execution**. Follow the Mac steps, then **Test setup**.
+1. Open the app → **Settings** (green gear in the header) → **Execution**. Follow the Mac steps, then **Test setup**.
 2. **Pipeline**: Agenda/Spec = Cursor, Grill/Backlog = Claude (shipped defaults).
 3. **Docs**: Grill Me skill + Discovery conventions.
-4. Run Spec on a ticket, then Start grill. Answer as the person in **Working as**.
+4. **Execution → Token pricing**: rates used for the $ on tickets. Studio/CIS use API usage when present; local CLI estimates characters ÷ 4.
+5. Run Spec on a ticket, then Start grill. Answer as the person in **Working as**.
 
 ## GenAI Studio / CIS
 

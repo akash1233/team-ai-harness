@@ -14,6 +14,25 @@ export type ThemeId = "paper" | "ink";
 export type DensityId = "comfortable" | "compact";
 export type PipelineLayout = "vertical" | "horizontal";
 
+export type AgentRates = {
+  inputUsdPerMTok: number;
+  outputUsdPerMTok: number;
+};
+
+export type PricingConfig = {
+  charsPerToken: number;
+  claude: AgentRates;
+  cursor: AgentRates;
+  studio: AgentRates;
+  cis: AgentRates;
+};
+
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  estimated: boolean;
+};
+
 export type ExecutionProvider = "local" | "studio" | "cis";
 export type LocalAgent = "cursor" | "claude";
 export type AgentKind = "cursor" | "claude" | "studio" | "cis";
@@ -37,6 +56,7 @@ export type ExecutionConfig = {
   cisTaskType: string;
   timeoutMs: number;
   demoFallbacks: boolean;
+  pricing: PricingConfig;
   /** @deprecated hydrated from older workspaces */
   provider?: ExecutionProvider;
   /** @deprecated hydrated from older workspaces */
@@ -52,6 +72,8 @@ export type AgentResponse = {
   via?: string;
   ok?: boolean;
   error?: string;
+  spend?: number;
+  usage?: TokenUsage;
 };
 
 export type GrillQuestion = {

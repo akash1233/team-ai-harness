@@ -404,7 +404,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         return;
       }
 
-      const spendDelta = result.spend ?? 0.08;
+      const spendDelta = result.spend ?? 0;
       const response = {
         id: uid("resp"),
         at: new Date().toISOString(),
@@ -413,6 +413,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         body: result.text,
         via: result.via,
         ok: true,
+        spend: spendDelta,
+        usage: result.usage,
       };
 
       set({
@@ -514,7 +516,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         get().failTicket(id, result.error, FRY_COLUMN_ID, result.via);
         return;
       }
-      const spendDelta = result.spend ?? 0.06;
+      const spendDelta = result.spend ?? 0;
       const response = {
         id: uid("resp"),
         at: new Date().toISOString(),
@@ -527,6 +529,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         body: result.text,
         via: result.via,
         ok: true,
+        spend: spendDelta,
+        usage: result.usage,
       };
       set({
         tickets: withTicket(get().tickets, id, (t) => {

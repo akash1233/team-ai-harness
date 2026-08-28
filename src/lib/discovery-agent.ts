@@ -27,6 +27,7 @@ export type AgentResult =
       jira?: JiraIssue[];
       grill?: { frontierEmpty: boolean; questions: GrillQuestion[] };
       via?: string;
+      usage?: { inputTokens: number; outputTokens: number; estimated: boolean };
     }
   | { ok: false; error: string; via?: string };
 
@@ -40,10 +41,6 @@ type AgentInput = {
   stepAgent?: StepAgent;
   docs?: TeamDoc[];
 };
-
-function spendFor(tokens: number): number {
-  return Math.round((0.04 + tokens / 8000) * 100) / 100;
-}
 
 function extractPlan(text: string): Plan | undefined {
   const start = text.indexOf(PLAN_JSON_START);
@@ -196,7 +193,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
         ok: true,
         text,
         summary: `Posted to #${channel}`,
-        spend: 0.02,
+        spend: 0,
         runId,
         slack: { channel, channelId, ts },
       };
@@ -225,7 +222,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
         ok: true,
         text: `Created:\n${text}`,
         summary: `Filed ${jira.length} issues`,
-        spend: 0.05,
+        spend: 0,
         runId,
         jira,
       };
@@ -248,6 +245,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
     }
     const text = live.ok && live.text.trim() ? live.text.trim() : fb.text;
     const via = live.ok ? live.via : "demo";
+    const spend = live.ok && !useDemo ? live.spend ?? 0 : 0;
 
     const plan = columnId === WRITE_PLAN_COLUMN_ID ? extractPlan(text) ?? fb.plan : undefined;
     const grill = columnId === FRY_COLUMN_ID ? extractGrill(text) ?? fb.grill : undefined;
@@ -267,11 +265,12 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
       ok: true,
       text,
       summary,
-      spend: spendFor(text.length),
+      spend,
       runId,
       plan,
       grill,
       via,
+      usage: live.ok && !useDemo ? live.usage : undefined,
     };
   });
 

@@ -1,12 +1,15 @@
 import { createDefaultExecution } from "./team-config";
 import { legacyDefaultAgent, resolveStep } from "./agents";
-import type { AgentKind, ExecutionConfig, StepAgent } from "./types";
+import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing";
+import type { AgentKind, ExecutionConfig, StepAgent, TokenUsage } from "./types";
 
 export type ModelCall = {
   text: string;
   ok: boolean;
   via: string;
   error?: string;
+  usage?: TokenUsage;
+  spend?: number;
 };
 
 function envStr(key: string): string | undefined {
@@ -24,6 +27,7 @@ export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
       : (client?.defaultAgent ?? fromLegacy ?? base.defaultAgent);
   const cursorTarget = envStr("PIT_CURSOR_TARGET") === "remote" ? "remote" : envStr("PIT_CURSOR_TARGET") === "local" ? "local" : base.cursorTarget;
   const claudeTarget = envStr("PIT_CLAUDE_TARGET") === "remote" ? "remote" : envStr("PIT_CLAUDE_TARGET") === "local" ? "local" : base.claudeTarget;
+  const seeded = mergePricing(base.pricing);
   return {
     ...base,
     defaultAgent,
@@ -42,6 +46,26 @@ export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
     cisTaskType: envStr("PIT_CIS_TASK_TYPE") || base.cisTaskType,
     timeoutMs: Number(envStr("PIT_TIMEOUT_MS") || base.timeoutMs) || 120000,
     demoFallbacks: envStr("PIT_DEMO_FALLBACKS") === "0" ? false : envStr("PIT_DEMO_FALLBACKS") === "1" ? true : base.demoFallbacks,
+    pricing: mergePricing({
+      ...seeded,
+      charsPerToken: Number(envStr("PIT_CHARS_PER_TOKEN") || seeded.charsPerToken) || seeded.charsPerToken,
+      claude: {
+        inputUsdPerMTok: Number(envStr("PIT_CLAUDE_IN_USD_PER_MTOK") || seeded.claude.inputUsdPerMTok),
+        outputUsdPerMTok: Number(envStr("PIT_CLAUDE_OUT_USD_PER_MTOK") || seeded.claude.outputUsdPerMTok),
+      },
+      cursor: {
+        inputUsdPerMTok: Number(envStr("PIT_CURSOR_IN_USD_PER_MTOK") || seeded.cursor.inputUsdPerMTok),
+        outputUsdPerMTok: Number(envStr("PIT_CURSOR_OUT_USD_PER_MTOK") || seeded.cursor.outputUsdPerMTok),
+      },
+      studio: {
+        inputUsdPerMTok: Number(envStr("PIT_STUDIO_IN_USD_PER_MTOK") || seeded.studio.inputUsdPerMTok),
+        outputUsdPerMTok: Number(envStr("PIT_STUDIO_OUT_USD_PER_MTOK") || seeded.studio.outputUsdPerMTok),
+      },
+      cis: {
+        inputUsdPerMTok: Number(envStr("PIT_CIS_IN_USD_PER_MTOK") || seeded.cis.inputUsdPerMTok),
+        outputUsdPerMTok: Number(envStr("PIT_CIS_OUT_USD_PER_MTOK") || seeded.cis.outputUsdPerMTok),
+      },
+    }),
     provider: defaultAgent === "studio" || defaultAgent === "cis" ? defaultAgent : "local",
     localAgent: defaultAgent === "claude" ? "claude" : "cursor",
   };
@@ -76,6 +100,23 @@ export function extractModelText(body: unknown): string {
     if (t) return t;
   }
   return "";
+}
+
+function attachCost(
+  call: ModelCall,
+  exec: ExecutionConfig,
+  kind: AgentKind,
+  system: string,
+  user: string,
+): ModelCall {
+  const pricing = mergePricing(exec.pricing);
+  const usage =
+    call.usage ?? usageFromText([system, user].filter(Boolean).join("\n\n"), call.text, pricing.charsPerToken);
+  return {
+    ...call,
+    usage,
+    spend: call.ok ? computeSpend(usage, ratesFor(kind, pricing)) : 0,
+  };
 }
 
 function pickText(value: unknown): string {
@@ -262,7 +303,7 @@ async function callLocalHttp(
     }
     const text = extractModelText(json) || (typeof json === "string" ? json : "");
     if (!text.trim()) return { ok: false, text: "", via, error: `${via} returned an empty body` };
-    return { ok: true, text, via };
+    return { ok: true, text, via, usage: extractUsage(json) ?? undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, text: "", via, error: `${via}: ${message}` };
@@ -308,7 +349,7 @@ async function callStudio(
     }
     const text = extractModelText(json);
     if (!text) return { ok: false, text: "", via: "Studio", error: "Studio returned no model text." };
-    return { ok: true, text, via: "Studio" };
+    return { ok: true, text, via: "Studio", usage: extractUsage(json) ?? undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, text: "", via: "Studio", error: `Studio: ${message}` };
@@ -372,7 +413,7 @@ async function callCis(
     }
     const text = extractModelText(json);
     if (!text) return { ok: false, text: "", via: "CIS", error: "CIS returned no model text." };
-    return { ok: true, text, via: "CIS" };
+    return { ok: true, text, via: "CIS", usage: extractUsage(json) ?? undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, text: "", via: "CIS", error: `CIS: ${message}` };
@@ -416,7 +457,7 @@ async function callRemoteAgent(
     if (!res.ok) return { ok: false, text: "", via, error: `${via} ${res.status}: ${raw.slice(0, 400)}` };
     const text = extractModelText(json) || (typeof json === "string" ? json : "");
     if (!text.trim()) return { ok: false, text: "", via, error: `${via} returned an empty body` };
-    return { ok: true, text, via };
+    return { ok: true, text, via, usage: extractUsage(json) ?? undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, text: "", via, error: `${via}: ${message}` };
@@ -435,28 +476,29 @@ export async function runModel(opts: {
   const step = resolveStep({ agent: opts.stepAgent ?? "inherit" }, exec);
   const prompt = [opts.system, opts.user].filter(Boolean).join("\n\n");
   const promptId = opts.promptId || exec.promptId;
+  const cost = (call: ModelCall) => attachCost(call, exec, step.kind, opts.system, opts.user);
 
-  if (step.kind === "studio") return callStudio(exec, prompt, promptId);
-  if (step.kind === "cis") return callCis(exec, prompt, opts.maxTokens);
+  if (step.kind === "studio") return cost(await callStudio(exec, prompt, promptId));
+  if (step.kind === "cis") return cost(await callCis(exec, prompt, opts.maxTokens));
 
   const kind = step.kind;
   if (step.target === "remote") {
     const remoteUrl = kind === "claude" ? exec.claudeRemoteUrl : exec.cursorRemoteUrl;
     if (!remoteUrl.trim()) {
-      return {
+      return cost({
         ok: false,
         text: "",
         via: step.label,
         error: `Set the ${kind === "claude" ? "Claude" : "Cursor"} remote URL in Team → Execution.`,
-      };
+      });
     }
-    return callRemoteAgent(remoteUrl.trim(), kind, exec, opts.system, opts.user, opts.maxTokens);
+    return cost(await callRemoteAgent(remoteUrl.trim(), kind, exec, opts.system, opts.user, opts.maxTokens));
   }
 
   if (exec.localHttpUrl.trim()) {
-    return callLocalHttp(exec.localHttpUrl, kind, exec, opts.system, opts.user, opts.maxTokens);
+    return cost(await callLocalHttp(exec.localHttpUrl, kind, exec, opts.system, opts.user, opts.maxTokens));
   }
-  return callLocalCli(exec, prompt, kind);
+  return cost(await callLocalCli(exec, prompt, kind));
 }
 
 async function lookupBin(bin: string): Promise<string | null> {

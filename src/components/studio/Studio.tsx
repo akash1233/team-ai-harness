@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { Plus, RotateCcw, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBoardStore } from "@/lib/board-store";
 import { formatSpend } from "@/lib/format";
@@ -89,11 +89,17 @@ export function Studio() {
             <RotateCcw className="size-4" />
             <span className="hidden md:inline">Reset</span>
           </Button>
-          <Button variant="secondary" size="md" onClick={() => toggleSettings(true)}>
-            <SlidersHorizontal className="size-4" />
-            Team
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => toggleSettings(true)}
+            aria-label="Open team settings"
+            className="border-2 border-accent-fg/20 shadow-panel"
+          >
+            <Settings className="size-5" />
+            Settings
           </Button>
-          <Button variant="primary" size="md" onClick={() => setNewOpen(true)}>
+          <Button variant="secondary" size="md" onClick={() => setNewOpen(true)}>
             <Plus className="size-4" />
             New
           </Button>

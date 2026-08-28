@@ -1,4 +1,6 @@
 export function formatSpend(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "$0.00";
+  if (Math.abs(n) < 0.01) return `$${n.toFixed(4)}`;
   return `$${n.toFixed(2)}`;
 }
 

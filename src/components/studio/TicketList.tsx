@@ -80,7 +80,7 @@ export function TicketList() {
           </ul>
         )}
         <div className="max-w-2xl">
-          <ExecutionTrail tickets={inFlow} stageId={activeStageId} columns={config.columns} />
+          <ExecutionTrail tickets={inFlow} columns={config.columns} />
         </div>
       </div>
     </section>

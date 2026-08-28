@@ -82,6 +82,21 @@ export type ExecutionConfig = {
   localAgent?: LocalAgent;
 };
 
+export type PipelineRun = {
+  id: string;
+  at: string;
+  flowId: string;
+  ticketId: string;
+  ticketKey: string;
+  columnId: string;
+  variable?: string;
+  output: string;
+  via?: string;
+  ok: boolean;
+  summary: string;
+  error?: string;
+};
+
 export type AgentResponse = {
   id: string;
   at: string;

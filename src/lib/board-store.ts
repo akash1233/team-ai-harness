@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Flow, GrillQuestion, GrillRound, TeamConfig, TeamDoc, TeamMember, TeamPrompt, Ticket, WorkflowColumn } from "./types";
+import type { Flow, GrillQuestion, GrillRound, PipelineRun, TeamConfig, TeamDoc, TeamMember, TeamPrompt, Ticket, WorkflowColumn } from "./types";
 import type { LinkedJira, LinkedRepo } from "./connectors";
 import { connectorVars, mergeConnectors } from "./connectors";
 import {
@@ -34,6 +34,7 @@ import { extractGrill, extractPlan, runDiscoveryAgent } from "./discovery-agent"
 
 type BoardState = {
   tickets: Ticket[];
+  flowRuns: PipelineRun[];
   config: TeamConfig;
   selectedId: string | null;
   activeStageId: string;
@@ -99,7 +100,7 @@ type BoardState = {
 };
 
 function persistNow(
-  state: Pick<BoardState, "tickets" | "config" | "selectedId" | "activeStageId" | "activeMemberId">,
+  state: Pick<BoardState, "tickets" | "flowRuns" | "config" | "selectedId" | "activeStageId" | "activeMemberId">,
 ) {
   if (typeof window === "undefined") return;
   try {
@@ -107,6 +108,7 @@ function persistNow(
       STORAGE_KEY,
       JSON.stringify({
         tickets: state.tickets,
+        flowRuns: state.flowRuns,
         config: state.config,
         selectedId: state.selectedId,
         activeStageId: state.activeStageId,
@@ -133,8 +135,34 @@ function stampTicket(t: Ticket, flowId = DISCOVERY_FLOW_ID): Ticket {
   };
 }
 
+function pushFlowRun(get: () => BoardState, set: (p: Partial<BoardState>) => void, run: Omit<PipelineRun, "id">) {
+  const entry: PipelineRun = { ...run, id: uid("run") };
+  set({ flowRuns: [entry, ...get().flowRuns].slice(0, 250) });
+}
+
+function seedRunsFromTickets(tickets: Ticket[], flowId: string): PipelineRun[] {
+  return tickets
+    .flatMap((t) =>
+      (t.agentResponses ?? []).map((r) => ({
+        id: r.id,
+        at: r.at,
+        flowId: t.flowId || flowId,
+        ticketId: t.id,
+        ticketKey: t.key,
+        columnId: r.columnId,
+        output: r.body,
+        via: r.via,
+        ok: r.ok !== false,
+        summary: r.summary,
+        error: r.error,
+      })),
+    )
+    .sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
 export const useBoardStore = create<BoardState>((set, get) => ({
   tickets: createSampleTickets(),
+  flowRuns: [],
   config: createDefaultTeam(),
   selectedId: null,
   activeStageId: FRY_COLUMN_ID,
@@ -149,7 +177,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<
-          Pick<BoardState, "tickets" | "config" | "selectedId" | "activeStageId" | "activeMemberId">
+          Pick<BoardState, "tickets" | "flowRuns" | "config" | "selectedId" | "activeStageId" | "activeMemberId">
         >;
         if (Array.isArray(parsed.tickets) && parsed.tickets.length > 0) {
           const config = parsed.config ? mergeTeamConfig(parsed.config) : createDefaultTeam();
@@ -158,6 +186,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
               parsed.tickets.map((t) => stampTicket(t, config.activeFlowId)),
               config.columns,
             ),
+            flowRuns:
+              Array.isArray(parsed.flowRuns) && parsed.flowRuns.length > 0
+                ? parsed.flowRuns
+                : seedRunsFromTickets(parsed.tickets, config.activeFlowId),
             config,
             selectedId: parsed.selectedId ?? null,
             activeStageId: resolveActiveStage(config.columns, parsed.activeStageId),
@@ -174,8 +206,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   persist: () => {
-    const { tickets, config, selectedId, activeStageId, activeMemberId } = get();
-    persistNow({ tickets, config, selectedId, activeStageId, activeMemberId });
+    const { tickets, flowRuns, config, selectedId, activeStageId, activeMemberId } = get();
+    persistNow({ tickets, flowRuns, config, selectedId, activeStageId, activeMemberId });
   },
 
   select: (id) => {
@@ -261,6 +293,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const samples = createSampleTickets();
     set({
       tickets: samples,
+      flowRuns: [],
       selectedId: null,
       activeStageId: FRY_COLUMN_ID,
       promptColumnId: null,
@@ -341,6 +374,19 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         sessionDir: undefined,
       })),
     });
+    pushFlowRun(get, set, {
+      at: new Date().toISOString(),
+      flowId: ticket?.flowId || get().config.activeFlowId,
+      ticketId: id,
+      ticketKey: ticket?.key || id,
+      columnId: col,
+      variable: outputVarName(columnById(col, get().config.columns)),
+      output: reason,
+      via,
+      ok: false,
+      summary: via ? `Failed · ${via}` : "Failed",
+      error: reason,
+    });
     get().persist();
   },
 
@@ -396,6 +442,18 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           outputs: { ...t.outputs, [col.id]: output },
           vars: harvestVars({ ...t, vars: t.vars ?? {} }, col, output),
         })),
+      });
+      pushFlowRun(get, set, {
+        at: new Date().toISOString(),
+        flowId: ticket.flowId || get().config.activeFlowId,
+        ticketId: ticket.id,
+        ticketKey: ticket.key,
+        columnId: col.id,
+        variable: outputVarName(col),
+        output,
+        via: "capture",
+        ok: true,
+        summary: "Captured input",
       });
       await get().continueAfter(id);
       return;
@@ -510,6 +568,20 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       });
 
       const after = get().tickets.find((t) => t.id === id);
+      if (after && liveCol) {
+        pushFlowRun(get, set, {
+          at: response.at,
+          flowId: after.flowId || get().config.activeFlowId,
+          ticketId: after.id,
+          ticketKey: after.key,
+          columnId: liveCol.id,
+          variable: outputVarName(liveCol),
+          output: stageOutputFromLog(result.text),
+          via: result.via,
+          ok: true,
+          summary: response.summary,
+        });
+      }
       if (!after) return;
       await get().continueAfter(id);
     } catch (err) {
@@ -589,6 +661,18 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         fryComplete: grill?.frontierEmpty ? true : t.fryComplete,
         plan: plan ?? t.plan,
       })),
+    });
+    pushFlowRun(get, set, {
+      at: new Date().toISOString(),
+      flowId: ticket.flowId || get().config.activeFlowId,
+      ticketId: ticket.id,
+      ticketKey: ticket.key,
+      columnId: ticket.columnId,
+      variable: outputVarName(liveCol),
+      output: stageOutputFromLog(text),
+      via: "Terminal",
+      ok: true,
+      summary: "Long stage · Terminal",
     });
     get().persist();
     await get().continueAfter(id);
@@ -1158,6 +1242,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     set({
       config: next,
       tickets: get().tickets.filter((t) => t.flowId !== id),
+      flowRuns: get().flowRuns.filter((r) => r.flowId !== id),
       selectedId: null,
       activeStageId: start ?? get().activeStageId,
     });

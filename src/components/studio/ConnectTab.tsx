@@ -79,7 +79,7 @@ export function ConnectTab() {
   return (
     <div className="flex flex-col gap-6">
       <p className="text-sm text-muted">
-        Point Kindling at your org Jira and GitHub Enterprise. Sync high-level issues and repos, then drop a Jira key or repo onto a pipeline ticket — that becomes <span className="font-mono">{"{{jira.key}}"}</span> / <span className="font-mono">{"{{repo}}"}</span> for every later stage.
+        Point Kindling at your org Jira and GitHub Enterprise with a PAT. Sync issues and repos, then drop a Jira key or repo onto a pipeline ticket — that becomes <span className="font-mono">{"{{jira.key}}"}</span> / <span className="font-mono">{"{{repo}}"}</span> for every later stage.
       </p>
 
       <section className="flex flex-col gap-3 rounded-md border border-border p-3">
@@ -92,17 +92,11 @@ export function ConnectTab() {
             onChange={(e) => patchJira({ baseUrl: e.target.value })}
           />
         </Field>
-        <Field label="Email (Cloud API token) — leave empty for PAT">
-          <Input
-            value={connectors.jira.email}
-            onChange={(e) => patchJira({ email: e.target.value })}
-            autoComplete="off"
-          />
-        </Field>
-        <Field label="Token / PAT">
+        <Field label="PAT">
           <Input
             type="password"
             className="font-mono"
+            placeholder="Jira personal access token"
             value={connectors.jira.token}
             onChange={(e) => patchJira({ token: e.target.value })}
             autoComplete="off"
@@ -158,10 +152,11 @@ export function ConnectTab() {
             onChange={(e) => patchGithub({ baseUrl: e.target.value })}
           />
         </Field>
-        <Field label="Token">
+        <Field label="PAT">
           <Input
             type="password"
             className="font-mono"
+            placeholder="GitHub Enterprise personal access token"
             value={connectors.github.token}
             onChange={(e) => patchGithub({ token: e.target.value })}
             autoComplete="off"

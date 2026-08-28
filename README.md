@@ -35,7 +35,7 @@ The **Settings** gear in the header is the control plane. Nothing about the pipe
 | **Pipeline** | Ordered stages: name, what it does, who runs it, **which prompt**, variable it publishes |
 | **Prompts** | Prompt library. Add prompt, paste skills into the body, or attach Skills. Stages pick one |
 | **Skills** | Skill/doc library. Prompts check which skills to append on run |
-| **Connect** | Jira + GitHub Enterprise URLs/tokens. Sync issues/repos; drop a key or repo on a ticket (`{{jira.key}}`, `{{repo}}`) |
+| **Connect** | Jira + GitHub Enterprise hosts and **PATs**. Sync issues/repos; drop a key or repo on a ticket (`{{jira.key}}`, `{{repo}}`) |
 | **Prompts** | Prompt templates (`{{spec}}`, `{{grill}}`, …) and per-stage Studio prompt IDs |
 | **Docs** | Grill Me skill + notes the grill reads |
 | **Execution** | Default agent, Cursor/Claude local vs remote, Studio/CIS, **Test Cursor / Test Claude**, MCP list, **token pricing** |

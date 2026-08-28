@@ -3,9 +3,14 @@ import { legacyDefaultAgent, resolveStep } from "./agents";
 import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing";
 import {
   explainCliFailure,
+  isNoiseLog,
+  readSession,
   runAgentProcess,
   runProcess,
+  sessionShouldStop,
+  startMacSession,
   withNonInteractiveFlags,
+  withoutAutoMode,
 } from "./cli-session";
 import type { AgentKind, ExecutionConfig, StepAgent, TokenUsage } from "./types";
 
@@ -671,7 +676,7 @@ async function locateBin(bin: string): Promise<{ path: string; onPath: boolean }
 }
 
 async function runVersion(binPath: string): Promise<{ ok: boolean; text: string }> {
-  const raw = await runProcess(binPath, ["--version"], 20000);
+  const raw = await runProcess(binPath, ["--version"], 4000);
   const text = (raw.out || raw.err).trim();
   if (text) return { ok: true, text: text.split("\n")[0] || text };
   if (raw.code === 0) return { ok: true, text: "ok" };
@@ -862,6 +867,133 @@ export async function probeSetup(
     error: ok ? undefined : text,
     checks,
   };
+}
+
+export async function startAgentTest(opts: {
+  execution?: ExecutionConfig;
+  stepAgent?: StepAgent;
+  mode?: "connect" | "run";
+  prompt?: string;
+  mcp?: boolean;
+  mcpServer?: string;
+}): Promise<{
+  ok: boolean;
+  via: string;
+  text: string;
+  error?: string;
+  checks: SetupCheck[];
+  sessionDir?: string;
+  log: string;
+}> {
+  const exec = resolveExecution(opts.execution);
+  const probe = await probeSetup(opts.execution, opts.stepAgent, {
+    ...opts,
+    mode: "connect",
+  });
+  if (opts.mode !== "run" && !opts.mcp) {
+    return { ...probe, log: probe.text };
+  }
+  const step = resolveStep({ agent: opts.stepAgent ?? "inherit" }, exec);
+  if (step.kind !== "cursor" && step.kind !== "claude") {
+    return { ...probe, log: probe.text };
+  }
+  const located = await locateCli(step.kind, exec);
+  if (!located.found) {
+    return { ...probe, log: probe.text };
+  }
+  const prompt = (opts.prompt || "Reply with exactly: pong").trim();
+  const model =
+    step.kind === "claude" ? exec.claudeTestModel?.trim() : exec.cursorTestModel?.trim();
+  let args: string[];
+  if (opts.mcp && (opts.mode !== "run" || Boolean(opts.mcpServer))) {
+    args = opts.mcpServer?.trim() ? ["mcp", "get", opts.mcpServer.trim()] : ["mcp", "list"];
+  } else {
+    const extra = model ? ["--model", model] : [];
+    const flags = withoutAutoMode(
+      withNonInteractiveFlags(
+        step.kind,
+        [...located.args, ...extra],
+        step.kind === "claude" ? exec.claudeExtraArgs : exec.cursorExtraArgs,
+      ),
+    );
+    args = [...flags, opts.mcp ? `List your MCP tools, then: ${prompt}` : prompt];
+  }
+  if (!exec.runInTerminal || process.platform !== "darwin") {
+    const raw = await runAgentProcess({
+      bin: located.found.path,
+      args,
+      cwd: workspaceOf(exec),
+      timeoutMs: 25000,
+      inTerminal: false,
+    });
+    const log = raw.out || raw.err;
+    const ok = raw.code === 0 && !isNoiseLog(log);
+    const checks = [
+      ...probe.checks,
+      {
+        ok,
+        label: opts.mcp ? `${step.label} MCP` : `${step.label} test run`,
+        detail: ok ? log.slice(0, 800) : explainCliFailure(log || `exit ${raw.code}`),
+      },
+    ];
+    return {
+      ok: ok && probe.ok,
+      via: step.label,
+      text: log.slice(0, 400),
+      error: ok ? undefined : explainCliFailure(log),
+      checks,
+      log,
+    };
+  }
+  const session = await startMacSession(workspaceOf(exec), located.found.path, args);
+  return {
+    ok: probe.ok,
+    via: step.label,
+    text: "Terminal opened — streaming log…",
+    checks: probe.checks,
+    sessionDir: session.dir,
+    log: `[kindling] session ${session.dir}\n[kindling] ${located.found.path} ${args.join(" ")}`,
+  };
+}
+
+export async function pollAgentTest(sessionDir: string): Promise<{
+  done: boolean;
+  ok: boolean;
+  log: string;
+  error?: string;
+}> {
+  const snap = await readSession(sessionDir);
+  const age = Date.now() - snap.startedAt;
+  if (sessionShouldStop(snap.log)) {
+    return { done: true, ok: false, log: snap.log, error: explainCliFailure(snap.log) };
+  }
+  if (snap.exitCode !== null) {
+    const ok = snap.exitCode === 0 && !isNoiseLog(snap.log);
+    return {
+      done: true,
+      ok,
+      log: snap.log,
+      error: ok ? undefined : explainCliFailure(snap.log) || `exit ${snap.exitCode}`,
+    };
+  }
+  if (age > 12000 && isNoiseLog(snap.log)) {
+    return {
+      done: true,
+      ok: false,
+      log: snap.log,
+      error:
+        "Cursor stalled on retrieval (no model reply after 12s). That is the agent, not Kindling. Run `agent -p --trust -f 'Reply with exactly: pong'` in Terminal to confirm.",
+    };
+  }
+  if (age > 40000) {
+    return {
+      done: true,
+      ok: false,
+      log: snap.log,
+      error: "Timed out after 40s. Check the Terminal window — Kindling will not wait forever.",
+    };
+  }
+  return { done: false, ok: true, log: snap.log };
 }
 
 export async function probeModel(execution?: ExecutionConfig, stepAgent?: StepAgent): Promise<ModelCall> {

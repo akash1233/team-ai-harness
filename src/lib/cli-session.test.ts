@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { explainCliFailure, toInteractiveArgs, withoutAutoMode, withNonInteractiveFlags } from "./cli-session.ts";
+import { explainCliFailure, isNoiseLog, toInteractiveArgs, withoutAutoMode, withNonInteractiveFlags } from "./cli-session.ts";
 
 test("Cursor print mode always gets --trust -f", () => {
   assert.deepEqual(withNonInteractiveFlags("cursor", ["-p", "--output-format", "text"]), [
@@ -35,4 +35,9 @@ test("interactive mode drops -p and output-format", () => {
 
 test("withoutAutoMode strips dontAsk", () => {
   assert.deepEqual(withoutAutoMode(["--permission-mode", "dontAsk", "-p"]), ["-p"]);
+});
+
+test("retrieval-only log is noise", () => {
+  assert.equal(isNoiseLog("cursor-retrieval: tracing to '/tmp/x.log'"), true);
+  assert.equal(isNoiseLog("pong"), false);
 });

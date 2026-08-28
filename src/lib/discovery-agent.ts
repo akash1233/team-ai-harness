@@ -283,6 +283,8 @@ export const testExecution = createServerFn({ method: "POST" })
       prompt?: string;
       mcp?: boolean;
       mcpServer?: string;
+      phase?: "start" | "poll";
+      sessionDir?: string;
     }) => input,
   )
   .handler(
@@ -294,10 +296,25 @@ export const testExecution = createServerFn({ method: "POST" })
       text: string;
       error?: string;
       checks?: { ok: boolean; label: string; detail: string }[];
+      sessionDir?: string;
+      log?: string;
+      done?: boolean;
     }> => {
       try {
-        const { probeSetup } = await import("./execution.server");
-        const result = await probeSetup(data.execution, data.stepAgent, {
+        const exec = await import("./execution.server");
+        if (data.phase === "poll" && data.sessionDir) {
+          const poll = await exec.pollAgentTest(data.sessionDir);
+          return {
+            ok: poll.ok,
+            via: "session",
+            text: poll.log.slice(-400),
+            error: poll.error,
+            log: poll.log,
+            done: poll.done,
+          };
+        }
+        const result = await exec.startAgentTest({
+          execution: data.execution,
           stepAgent: data.stepAgent,
           mode: data.mode,
           prompt: data.prompt,
@@ -310,6 +327,9 @@ export const testExecution = createServerFn({ method: "POST" })
           text: result.text.slice(0, 800),
           error: result.error,
           checks: result.checks,
+          sessionDir: result.sessionDir,
+          log: result.log,
+          done: !result.sessionDir,
         };
       } catch (err) {
         return {
@@ -317,6 +337,7 @@ export const testExecution = createServerFn({ method: "POST" })
           via: "executor",
           text: "",
           error: err instanceof Error ? err.message : "Setup check failed",
+          done: true,
         };
       }
     },

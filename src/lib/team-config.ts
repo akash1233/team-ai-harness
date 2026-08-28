@@ -88,7 +88,7 @@ export function createDefaultExecution(): ExecutionConfig {
     demoFallbacks: true,
     pricing: mergePricing(),
     claudeTestModel: "haiku",
-    cursorTestModel: "composer-1",
+    cursorTestModel: "",
     workspaceDir: "",
     cursorExtraArgs: "--trust -f",
     claudeExtraArgs: "",

@@ -727,6 +727,7 @@ function ExecutionTab() {
     text: string;
     error?: string;
     checks?: { ok: boolean; label: string; detail: string }[];
+    log?: string;
   } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("Reply with exactly: pong");
@@ -740,9 +741,9 @@ function ExecutionTab() {
   async function test(stepAgent: StepAgent, extra?: { mcp?: boolean }) {
     const label = extra?.mcp ? `${stepAgent}-mcp` : stepAgent;
     setBusy(label);
-    setProbe({ ok: true, via: stepAgent, text: extra?.mcp ? "Checking MCP…" : connectOnly ? "Checking setup…" : "Running cheapest-model ping…" });
+    setProbe({ ok: true, via: stepAgent, text: "Starting…", log: "[kindling] starting" });
     try {
-      const result = await testExecution({
+      const started = await testExecution({
         data: {
           execution: exec,
           stepAgent,
@@ -750,9 +751,45 @@ function ExecutionTab() {
           prompt,
           mcp: extra?.mcp,
           mcpServer,
+          phase: "start",
         },
       });
-      setProbe(result);
+      setProbe({
+        ok: started.ok,
+        via: started.via,
+        text: started.text,
+        error: started.error,
+        checks: started.checks,
+        log: started.log,
+      });
+      if (!started.sessionDir || started.done) {
+        if (started.sessionDir) {
+          /* fall through */
+        } else {
+          return;
+        }
+      }
+      if (!started.sessionDir) return;
+      const dir = started.sessionDir;
+      for (let i = 0; i < 80; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const poll = await testExecution({ data: { phase: "poll", sessionDir: dir } });
+        setProbe((prev) => ({
+          ok: poll.done ? poll.ok : true,
+          via: started.via,
+          text: poll.done ? (poll.ok ? "Test finished" : poll.error || "Failed") : `Streaming log… ${Math.round((i + 1) * 0.5)}s`,
+          error: poll.done ? poll.error : undefined,
+          checks: started.checks,
+          log: poll.log || prev?.log,
+        }));
+        if (poll.done) return;
+      }
+      setProbe((prev) => ({
+        ...(prev ?? { ok: false, via: started.via, text: "" }),
+        ok: false,
+        text: "Stopped polling after 40s",
+        error: "Stopped polling after 40s",
+      }));
     } catch (err) {
       setProbe({
         ok: false,
@@ -899,6 +936,11 @@ function ExecutionTab() {
           ) : (
             <p className="mt-1">{probe.ok ? probe.text || "ok" : probe.error || "Failed"}</p>
           )}
+          {probe.log ? (
+            <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-inset p-2 font-mono text-2xs text-fg">
+              {probe.log}
+            </pre>
+          ) : null}
           {!probe.ok && /PATH|not on PATH|not on Node PATH/i.test(probe.error || probe.text || "") ? (
             <p className="mt-2 text-2xs text-muted">
               Mac: add <span className="font-mono">~/.local/bin</span> to <span className="font-mono">~/.zshrc</span>, open a new Terminal, run <span className="font-mono">npm run dev</span> from there. If the binary is <span className="font-mono">cursor-agent</span>, change the Cursor command below.
@@ -942,7 +984,8 @@ function ExecutionTab() {
         <Field label="Test model (cheapest ping)">
           <Input
             className="font-mono"
-            value={exec.cursorTestModel ?? "composer-1"}
+            value={exec.cursorTestModel ?? ""}
+            placeholder="agent default"
             onChange={(e) => patch({ cursorTestModel: e.target.value })}
           />
         </Field>

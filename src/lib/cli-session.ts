@@ -150,16 +150,21 @@ export async function readIfExists(file: string): Promise<string> {
   }
 }
 
-/**
- * Open Terminal.app and tee print-mode stdout into a log Kindling reads.
- * Does not wrap in `script` (that launches the Claude TUI and hangs the app).
- */
-export async function runInMacTerminal(
+export function isNoiseLog(log: string): boolean {
+  const lines = stripAnsi(log)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .filter((l) => !/^Kindling/i.test(l) && !/nvm is not compatible/i.test(l) && !/^Run `unset/i.test(l));
+  if (!lines.length) return true;
+  return lines.every((l) => /cursor-retrieval: tracing/i.test(l));
+}
+
+export async function startMacSession(
   cwd: string,
   bin: string,
   args: string[],
-  timeoutMs: number,
-): Promise<{ code: number | null; out: string; err: string }> {
+): Promise<{ dir: string; outFile: string; codeFile: string }> {
   const fs = await import("node:fs/promises");
   const os = await import("node:os");
   const path = await import("node:path");
@@ -167,42 +172,78 @@ export async function runInMacTerminal(
   const outFile = path.join(dir, "out.txt");
   const codeFile = path.join(dir, "code.txt");
   const script = path.join(dir, "run.command");
+  const startedFile = path.join(dir, "started.txt");
+  await fs.writeFile(startedFile, String(Date.now()));
+  await fs.writeFile(outFile, `[kindling] ${new Date().toISOString()} starting\n[kindling] ${bin} ${args.join(" ")}\n`);
   const body = `#!/bin/bash
 unset npm_config_prefix
 unset NPM_CONFIG_PREFIX
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 set -o pipefail
 cd ${shellQuote(cwd)}
-echo "Kindling print session — output is teed into the app."
-echo
-${shellQuote(bin)} ${args.map(shellQuote).join(" ")} 2>&1 | tee ${shellQuote(outFile)}
+echo "[kindling] $(date -u +%H:%M:%S) print session in $(pwd)" | tee -a ${shellQuote(outFile)}
+${shellQuote(bin)} ${args.map(shellQuote).join(" ")} 2>&1 | tee -a ${shellQuote(outFile)}
 echo $? > ${shellQuote(codeFile)}
-echo
-echo "Kindling captured the log. You can close this window."
+echo "[kindling] $(date -u +%H:%M:%S) exit $(cat ${shellQuote(codeFile)})" | tee -a ${shellQuote(outFile)}
 `;
   await fs.writeFile(script, body, { mode: 0o755 });
   const opened = await runProcess("open", ["-g", "-a", "Terminal", script], 8000);
-  if (opened.code !== 0 && !opened.out && opened.err) {
-    return { code: 1, out: "", err: opened.err || "Could not open Terminal.app" };
+  if (opened.code !== 0 && opened.err) {
+    await fs.writeFile(codeFile, "1");
+    await fs.appendFile(outFile, `\n[kindling] failed to open Terminal: ${opened.err}\n`);
   }
+  return { dir, outFile, codeFile };
+}
+
+export async function readSession(dir: string): Promise<{
+  log: string;
+  exitCode: number | null;
+  startedAt: number;
+}> {
+  const path = await import("node:path");
+  const raw = await readIfExists(path.join(dir, "out.txt"));
+  const codeText = await readIfExists(path.join(dir, "code.txt"));
+  const started = Number(await readIfExists(path.join(dir, "started.txt"))) || Date.now();
+  return {
+    log: stripAnsi(raw),
+    exitCode: codeText === "" ? null : Number(codeText),
+    startedAt: started,
+  };
+}
+
+/**
+ * Open Terminal.app and tee print-mode stdout into a log Kindling reads.
+ */
+export async function runInMacTerminal(
+  cwd: string,
+  bin: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ code: number | null; out: string; err: string }> {
+  const { dir } = await startMacSession(cwd, bin, args);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const codeText = await readIfExists(codeFile);
-    const raw = await readIfExists(outFile);
-    const out = stripAnsi(raw);
-    if (sessionShouldStop(out)) {
-      return { code: 1, out, err: explainCliFailure(out) };
+    const snap = await readSession(dir);
+    if (sessionShouldStop(snap.log)) {
+      return { code: 1, out: snap.log, err: explainCliFailure(snap.log) };
     }
-    if (codeText !== "") {
-      return { code: Number(codeText), out, err: "" };
+    if (snap.exitCode !== null) {
+      return { code: snap.exitCode, out: snap.log, err: "" };
+    }
+    if (Date.now() - snap.startedAt > 15000 && isNoiseLog(snap.log)) {
+      return {
+        code: 1,
+        out: snap.log,
+        err: "Cursor only printed a retrieval trace — no model reply. That is Cursor stalling, not Kindling. Try Test again, or run the same command in Terminal yourself.",
+      };
     }
     await new Promise((r) => setTimeout(r, 400));
   }
-  const out = stripAnsi(await readIfExists(outFile));
-  if (out.length > 20) {
-    return { code: sessionShouldStop(out) ? 1 : 0, out, err: explainCliFailure(out) };
+  const snap = await readSession(dir);
+  if (snap.log.length > 20 && !isNoiseLog(snap.log) && !sessionShouldStop(snap.log)) {
+    return { code: 0, out: snap.log, err: "" };
   }
-  return { code: 1, out, err: "Timed out waiting for the Terminal session." };
+  return { code: 1, out: snap.log, err: explainCliFailure(snap.log) || "Timed out waiting for the Terminal session." };
 }
 
 export async function runAgentProcess(opts: {

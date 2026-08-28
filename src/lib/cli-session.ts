@@ -5,7 +5,7 @@ export function withNonInteractiveFlags(
   extraLine = "",
 ): string[] {
   const extra = extraLine.trim().split(/\s+/).filter(Boolean);
-  const defaults = kind === "cursor" ? ["--trust", "-f"] : ["--permission-mode", "dontAsk"];
+  const defaults = kind === "cursor" ? ["--trust", "-f"] : [];
   const add = extra.length ? extra : defaults;
   const have = new Set(args);
   const missing: string[] = [];
@@ -37,14 +37,53 @@ export function toInteractiveArgs(args: string[]): string[] {
   return out;
 }
 
+/** Workday Claude blocks auto mode outside a dev container. */
+export function withoutAutoMode(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === "--dangerously-skip-permissions") continue;
+    if (a === "--permission-mode") {
+      const next = args[i + 1] || "";
+      if (/dontAsk|bypassPermissions|auto/i.test(next)) {
+        i += 1;
+        continue;
+      }
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+export function stripAnsi(text: string): string {
+  return text
+    .replace(/\x1B\[[0-9;?]*[A-Za-z]/g, "")
+    .replace(/\x1B\][^\x07]*\x07/g, "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+}
+
 export function explainCliFailure(text: string): string {
-  if (/Workspace Trust Required|Do you trust the contents of this directory/i.test(text)) {
-    return "Cursor blocked on workspace trust (no TTY). Kindling passes --trust -f and opens Terminal as a live session.";
+  const plain = stripAnsi(text);
+  if (/Auto mode is allowed only in dev containers|UserPromptSubmit operation blocked/i.test(plain)) {
+    return "Workday Claude blocked auto mode (--permission-mode dontAsk). Kindling now runs print mode without auto. Answer any trust prompt in Terminal, then re-run.";
   }
-  if (/permission|allow this|yes\/no/i.test(text) && /claude/i.test(text)) {
-    return "Claude asked for permission. Answer in the Terminal window — Kindling is capturing the log.";
+  if (/Quick safety check|Is this a project you created/i.test(plain)) {
+    return "Claude is waiting on the workspace trust prompt in Terminal. Type yes there, then re-run the test.";
   }
-  return text;
+  if (/Workspace Trust Required|Do you trust the contents of this directory/i.test(plain)) {
+    return "Cursor blocked on workspace trust. Kindling passes --trust -f. If Terminal still asks, confirm once.";
+  }
+  if (/permission|allow this|yes\/no/i.test(plain) && /claude/i.test(plain)) {
+    return "Claude asked for permission in Terminal. Answer there — Kindling captures the log.";
+  }
+  return plain;
+}
+
+export function sessionShouldStop(text: string): boolean {
+  const plain = stripAnsi(text);
+  return /UserPromptSubmit operation blocked|Auto mode is allowed only in dev containers|Quick safety check|Workspace Trust Required|Do you trust the contents of this directory/i.test(
+    plain,
+  );
 }
 
 export function shellQuote(value: string): string {
@@ -112,8 +151,8 @@ export async function readIfExists(file: string): Promise<string> {
 }
 
 /**
- * Open Terminal.app as a live TTY (`script` records it). Kindling tails the log.
- * Does not steal the agent's stdout — you talk in that window.
+ * Open Terminal.app and tee print-mode stdout into a log Kindling reads.
+ * Does not wrap in `script` (that launches the Claude TUI and hangs the app).
  */
 export async function runInMacTerminal(
   cwd: string,
@@ -132,12 +171,11 @@ export async function runInMacTerminal(
 unset npm_config_prefix
 unset NPM_CONFIG_PREFIX
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-set +e
+set -o pipefail
 cd ${shellQuote(cwd)}
-echo "Kindling live session — talk to the agent here. Close this window when finished."
-echo "Log is also captured in the Kindling app."
+echo "Kindling print session — output is teed into the app."
 echo
-script -q ${shellQuote(outFile)} ${shellQuote(bin)} ${args.map(shellQuote).join(" ")}
+${shellQuote(bin)} ${args.map(shellQuote).join(" ")} 2>&1 | tee ${shellQuote(outFile)}
 echo $? > ${shellQuote(codeFile)}
 echo
 echo "Kindling captured the log. You can close this window."
@@ -148,27 +186,23 @@ echo "Kindling captured the log. You can close this window."
     return { code: 1, out: "", err: opened.err || "Could not open Terminal.app" };
   }
   const start = Date.now();
-  let lastLen = 0;
-  let stable = 0;
   while (Date.now() - start < timeoutMs) {
     const codeText = await readIfExists(codeFile);
-    const out = await readIfExists(outFile);
+    const raw = await readIfExists(outFile);
+    const out = stripAnsi(raw);
+    if (sessionShouldStop(out)) {
+      return { code: 1, out, err: explainCliFailure(out) };
+    }
     if (codeText !== "") {
       return { code: Number(codeText), out, err: "" };
     }
-    if (out.length > lastLen) {
-      lastLen = out.length;
-      stable = 0;
-    } else if (out.length > 80) {
-      stable += 1;
-    }
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 400));
   }
-  const out = await readIfExists(outFile);
-  if (out.length > 40) {
-    return { code: 0, out, err: "Session still open in Terminal — Kindling captured the log so far." };
+  const out = stripAnsi(await readIfExists(outFile));
+  if (out.length > 20) {
+    return { code: sessionShouldStop(out) ? 1 : 0, out, err: explainCliFailure(out) };
   }
-  return { code: 1, out, err: "Timed out waiting for the Terminal session. Leave the window open and talk to the agent; Kindling tails the log." };
+  return { code: 1, out, err: "Timed out waiting for the Terminal session." };
 }
 
 export async function runAgentProcess(opts: {
@@ -178,10 +212,11 @@ export async function runAgentProcess(opts: {
   timeoutMs: number;
   inTerminal: boolean;
 }): Promise<{ code: number | null; out: string; err: string; via: "terminal" | "spawn" }> {
+  const args = withoutAutoMode(opts.args);
   if (opts.inTerminal && process.platform === "darwin") {
-    const r = await runInMacTerminal(opts.cwd, opts.bin, toInteractiveArgs(opts.args), opts.timeoutMs);
-    return { ...r, via: "terminal" };
+    const r = await runInMacTerminal(opts.cwd, opts.bin, args, opts.timeoutMs);
+    return { ...r, out: stripAnsi(r.out), err: stripAnsi(r.err), via: "terminal" };
   }
-  const r = await runProcess(opts.bin, opts.args, opts.timeoutMs, opts.cwd);
-  return { ...r, via: "spawn" };
+  const r = await runProcess(opts.bin, args, opts.timeoutMs, opts.cwd);
+  return { ...r, out: stripAnsi(r.out), err: stripAnsi(r.err), via: "spawn" };
 }

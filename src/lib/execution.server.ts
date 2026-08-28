@@ -76,7 +76,7 @@ export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
     localAgent: defaultAgent === "claude" ? "claude" : "cursor",
     workspaceDir: envStr("PIT_WORKSPACE") || base.workspaceDir || "",
     cursorExtraArgs: envStr("PIT_CURSOR_EXTRA_ARGS") || base.cursorExtraArgs || "--trust -f",
-    claudeExtraArgs: envStr("PIT_CLAUDE_EXTRA_ARGS") || base.claudeExtraArgs || "--permission-mode dontAsk",
+    claudeExtraArgs: envStr("PIT_CLAUDE_EXTRA_ARGS") || base.claudeExtraArgs || "",
     runInTerminal: envStr("PIT_RUN_IN_TERMINAL") === "0" ? false : envStr("PIT_RUN_IN_TERMINAL") === "1" ? true : base.runInTerminal !== false,
   };
 }

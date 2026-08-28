@@ -91,7 +91,7 @@ export function createDefaultExecution(): ExecutionConfig {
     cursorTestModel: "composer-1",
     workspaceDir: "",
     cursorExtraArgs: "--trust -f",
-    claudeExtraArgs: "--permission-mode dontAsk",
+    claudeExtraArgs: "",
     runInTerminal: true,
     provider: "local",
     localAgent: "cursor",

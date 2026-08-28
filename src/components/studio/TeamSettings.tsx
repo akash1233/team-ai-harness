@@ -768,7 +768,7 @@ function ExecutionTab() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted">
-        Kindling opens Terminal.app as a <strong>live session</strong> (not a one-shot command). Talk to Cursor or Claude there — they can ask you questions. Kindling records the session with <span className="font-mono">script</span> and shows the log here. Close the Terminal window when you are done.
+        Kindling opens Terminal and <span className="font-mono">tee</span>s print mode (<span className="font-mono">-p</span>) into the app log. Workday Claude blocks auto mode outside a dev container, so we never pass <span className="font-mono">--permission-mode dontAsk</span>. If Terminal asks “do you trust this folder?”, answer yes once.
       </p>
       <MacAgentHints />
       {exec.demoFallbacks ? (
@@ -968,7 +968,7 @@ function ExecutionTab() {
         <Field label="Print-mode flags (non-interactive)">
           <Input
             className="font-mono"
-            value={exec.claudeExtraArgs ?? "--permission-mode dontAsk"}
+            value={exec.claudeExtraArgs ?? ""}
             onChange={(e) => patch({ claudeExtraArgs: e.target.value })}
           />
         </Field>

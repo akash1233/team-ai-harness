@@ -9,6 +9,7 @@ import { FRY_COLUMN_ID, columnById } from "@/lib/columns";
 import { useVoice } from "@/lib/use-voice";
 import { cn } from "@/lib/cn";
 import type { GrillQuestion, Ticket } from "@/lib/types";
+import { PayloadEditor, useStagePayload } from "./PayloadEditor";
 
 export function GrillRoom({ ticket }: { ticket: Ticket }) {
   const runTicket = useBoardStore((s) => s.runTicket);
@@ -26,6 +27,7 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
   const step = resolveStep(col, execution);
   const voice = useVoice();
   const [voiceCursor, setVoiceCursor] = useState<number | null>(null);
+  const payload = useStagePayload(ticket);
 
   const done = answeredCount(openRound?.questions ?? []);
   const total = openRound?.questions.length ?? 0;
@@ -38,12 +40,20 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
         </p>
         <SpecBlock spec={spec} />
         <DocsLine docs={docs} />
+        <PayloadEditor
+          payload={payload.payload}
+          onChange={payload.setPayload}
+          loading={payload.loading}
+          error={payload.error}
+          dirty={payload.dirty}
+          onRegenerate={() => void payload.regenerate()}
+        />
         <Button
           variant="primary"
           size="md"
           className="w-full"
-          disabled={busy}
-          onClick={() => void runTicket(ticket.id)}
+          disabled={busy || payload.loading || !payload.payload}
+          onClick={() => void runTicket(ticket.id, payload.payload ?? undefined)}
         >
           {busy ? <RotateCw className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
           {busy ? "Grilling…" : `Start grill · ${step.label}`}

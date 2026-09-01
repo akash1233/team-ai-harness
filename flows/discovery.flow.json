@@ -1,0 +1,156 @@
+{
+  "id": "flow-discovery",
+  "name": "Discovery",
+  "description": "Brief → agenda → notify → notes → spec → grill → backlog → file",
+  "variables": {
+    "brief": "Brief composed text from manual Save (Slack channel, ID, members, notes)",
+    "agenda": "Full agenda document from Agenda stage",
+    "transcript": "Meeting notes from Notes stage",
+    "spec": "Spec document from Spec stage",
+    "grill": "Grill Q&A record",
+    "plan": "Backlog plan JSON string",
+    "slack_post": "Notify post summary after Slack MCP",
+    "prev": "Last stage output",
+    "slackChannel": "Slack channel name (no #) from Brief",
+    "slackChannelId": "Slack channel ID (C…) from Brief",
+    "slack.channel": "Alias for slackChannel",
+    "slack.members": "Notify roster handles from Brief",
+    "slackMessage": "Composed Notify post body (optional Jira header + agenda)",
+    "slack.ts": "Posted message timestamp after Notify harvest",
+    "jira": "All linked Jira issues: KEY title + description each, blank-line separated",
+    "jira.key": "First linked issue key only",
+    "jira.title": "First linked issue title",
+    "jira.description": "First linked issue description",
+    "jira.status": "First linked issue status",
+    "jira.url": "First linked issue URL",
+    "repo": "Linked repo full name",
+    "repo.fullName": "Linked repo full name",
+    "repo.url": "Linked repo URL",
+    "repo.branch": "Linked repo default branch",
+    "repo.description": "Linked repo description",
+    "ticket.key": "Ticket card key",
+    "ticket.title": "Ticket card title",
+    "ticket.description": "Ticket card description (user-typed only)",
+    "ticket.labels": "Ticket labels comma-separated",
+    "context": "Auto-aggregated var dump (opt-in only)",
+    "docs": "Attached skill documents (Grill)",
+    "input": "Generic manual capture"
+  },
+  "stages": [
+    {
+      "id": "ideation",
+      "label": "Brief",
+      "role": "collect-input",
+      "agent": "manual",
+      "writes": ["brief", "slackChannel", "slackChannelId", "slack.members", "prev"]
+    },
+    {
+      "id": "prep-agenda",
+      "label": "Agenda",
+      "role": "prompt",
+      "agent": "cursor",
+      "writes": ["agenda", "prev"],
+      "maxTokens": 1100,
+      "prompt": {
+        "system": "Write a Team Discussion Agenda with exactly these sections:\n1. Problem / Goals / Metrics\n2. Users / Personas / Stories\n3. Research (competitors / data)\n4. Features / UI / API\n5. Risks / Out of scope / Tech\n6. Priorities\nEnd with: Record the full meeting.\nDo not send Slack. Do not create Jira issues. Agenda document only.\n\nBusiness rules:\n- Brief below = meeting logistics (channel, attendees).\n- Every attached Jira issue = product context; cover all of them, not just the first.\n- If no Jira is attached, use Brief notes only.",
+        "user": "Brief (logistics):\n{{brief}}\n\nAll attached Jira issues (product context):\n{{jira}}\n\nWrite the agenda now."
+      }
+    },
+    {
+      "id": "preview-agenda",
+      "label": "Review agenda",
+      "role": "review"
+    },
+    {
+      "id": "send-slack",
+      "label": "Notify",
+      "role": "prompt",
+      "agent": "cursor",
+      "writes": ["slack_post", "slackMessage", "slack.ts", "prev"],
+      "maxTokens": 8000,
+      "prompt": {
+        "system": "slack-mcp slack_write → chat.postMessage",
+        "user": "Post the approved agenda to Slack using slack-mcp slack_write.\n\nCall slack_write with method chat.postMessage and params channel + text.\nApprove the slack_write tool call when Cursor prompts.\n\nChannel ID: {{slackChannelId}}\nChannel: #{{slackChannel}}\n\nPost this message verbatim:\n\n{{slackMessage}}"
+      }
+    },
+    {
+      "id": "transcript",
+      "label": "Notes",
+      "role": "collect-input",
+      "agent": "manual",
+      "writes": ["transcript", "prev"]
+    },
+    {
+      "id": "synthesize",
+      "label": "Spec",
+      "role": "prompt",
+      "agent": "studio",
+      "writes": ["spec", "prev"],
+      "maxTokens": 1400,
+      "prompt": {
+        "system": "Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.\n\nThis skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.\n\nThe issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run /setup-matt-pocock-skills.\n\nProcess\nExplore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.\n\nSketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.\n\nCheck with the user that these seams match their expectations.\n\nWrite the spec using the template below, then publish it to the project issue tracker. Apply the ready-for-agent triage label - no need for additional triage.\n\nProblem Statement\nThe problem that the user is facing, from the user's perspective.\n\nSolution\nThe solution to the problem, from the user's perspective.\n\nUser Stories\nA LONG, numbered list of user stories. Each user story should be in the format of:\n\nAs an <role>, I want a <feature>, so that <benefit>\n\n1. As a mobile bank customer, I want to see balance on my accounts, so that I can make better informed decisions about my spending\n\nThis list of user stories should be extremely extensive and cover all aspects of the feature.\n\nImplementation Decisions\nA list of implementation decisions that were made. This can include:\n\nThe modules that will be built/modified\nThe interfaces of those modules that will be modified\nTechnical clarifications from the developer\nArchitectural decisions\nSchema changes\nAPI contracts\nSpecific interactions\nDo NOT include specific file paths or code snippets. They may end up being outdated very quickly.\n\nException: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it within the relevant decision and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.\n\nTesting Decisions\nA list of testing decisions that were made. Include:\n\nA description of what makes a good test (only test external behavior, not implementation details)\nWhich modules will be tested\nPrior art for the tests (i.e. similar types of tests in the codebase)\n\nOut of Scope\nA description of the things that are out of scope for this spec.",
+        "user": "Conversation:\n{{transcript}}\n\nJira (if attached):\n{{jira}}"
+      }
+    },
+    {
+      "id": "preview-synthesize",
+      "label": "Review spec",
+      "role": "review"
+    },
+    {
+      "id": "fry",
+      "label": "Grill",
+      "role": "prompt",
+      "agent": "claude",
+      "writes": ["grill", "prev"],
+      "maxTokens": 1100,
+      "prompt": {
+        "system": "Grill the spec. Return ONLY a JSON object in a json fence with shape:\n{\"frontierEmpty\": boolean, \"questions\": [{\"n\": 1, \"question\": \"...\", \"recommended\": \"...\", \"source\": \"spec\"}], \"conclusions\": \"markdown if frontierEmpty\"}\n3–6 questions per round. No interview small talk.\n\n{{docs}}",
+        "user": "Spec:\n{{spec}}\n\nTranscript (only if the spec is silent):\n{{transcript}}\n\nPrior grill:\n{{grill}}\n\n{{grillPhase}}"
+      }
+    },
+    {
+      "id": "preview-fry",
+      "label": "Review grill",
+      "role": "review"
+    },
+    {
+      "id": "write-plan",
+      "label": "Backlog",
+      "role": "plan",
+      "agent": "cursor",
+      "writes": ["plan", "prev"],
+      "maxTokens": 1600,
+      "prompt": {
+        "system": "Emit epics and stories only as JSON. steps[].title must start with \"Epic:\" or \"Story:\". Honor Grill Me answers as binding decisions.",
+        "user": "Spec:\n{{spec}}\n\nGrill:\n{{grill}}\n\nEmit <<<PLAN_JSON then JSON then PLAN_JSON>>>. A short prose summary may precede the fence."
+      }
+    },
+    {
+      "id": "approve",
+      "label": "Sign-off",
+      "role": "approve"
+    },
+    {
+      "id": "file-jira",
+      "label": "File",
+      "role": "prompt",
+      "agent": "cursor",
+      "maxTokens": 4000,
+      "prompt": {
+        "system": "Create Jira issues from the approved plan only. Honor epic/story hierarchy. Do not invent extra scope.",
+        "user": "{{plan}}"
+      }
+    },
+    {
+      "id": "done",
+      "label": "Done",
+      "role": "terminal"
+    },
+    {
+      "id": "blocked",
+      "label": "Blocked",
+      "role": "terminal"
+    }
+  ]
+}

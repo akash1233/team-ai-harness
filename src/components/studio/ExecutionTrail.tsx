@@ -29,6 +29,7 @@ export function ExecutionTrail({
       at: r.at,
       columnId: r.columnId,
       summary: `${r.ticketKey} · ${r.summary}${r.variable ? ` · {{${r.variable}}}` : ""}`,
+      input: r.input,
       body: r.output,
       via: r.via,
       ok: r.ok,

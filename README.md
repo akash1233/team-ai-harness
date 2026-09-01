@@ -92,10 +92,16 @@ Then restart `npm run dev` **from that Terminal**, Test Cursor and Test Claude, 
 
 A workspace can run **multiple flows**. Switch them in the header or Settings → Flows. Tickets stay on the flow they were created in.
 
-Each stage publishes a named value. Later prompts interpolate it:
+**Discovery prompt source of truth:** [`flows/discovery.flow.json`](flows/discovery.flow.json) — edit stage `prompt.system` / `prompt.user` there. Full variable catalog: [`flows/README.md`](flows/README.md). Loader: `src/lib/flow-spec.ts`.
+
+Each stage publishes a named value. Later prompts interpolate it **only when the token appears in the stage prompt**:
 
 | Token | Source |
 | --- | --- |
+| `{{slackChannel}}` | Brief — defaults from **Settings → Team**; saved into pipeline vars on Brief |
+| `{{slackChannelId}}` | Brief — team default channel ID; saved into pipeline vars on Brief |
+| `{{slackMessage}}` | Notify — pre-synced on stage entry; Cursor CLI posts via **slack-mcp** |
+| `{{slack_post}}` | Notify — agent reply / post receipt after Cursor run |
 | `{{brief}}` | Brief / ideation |
 | `{{agenda}}` | Agenda |
 | `{{transcript}}` | Meeting notes |
@@ -113,7 +119,7 @@ With **Keep running agent stages** on, a successful run skips review gates and s
 
 | Stage | Default agent |
 | --- | --- |
-| Agenda, Backlog | Cursor |
+| Agenda, Notify, Backlog | Cursor |
 | Spec | GenAI Studio |
 | Grill | Claude |
 | Everything else | Inherit |
@@ -154,7 +160,7 @@ src/lib/
   board-store.ts                 Zustand persistence
 ```
 
-Workspace state: `localStorage` key `pit-studio-v2`. **Reset** restores sample tickets. **Settings → Look → Restore default team** restores pipeline defaults.
+Workspace state: `localStorage` key `kindling-v1`. **Reset** restores one empty sample ticket at Brief (Slack channel/ID from team settings). **Settings → Look → Restore default team** restores pipeline defaults.
 
 ## Scripts
 

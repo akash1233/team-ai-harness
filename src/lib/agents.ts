@@ -2,11 +2,21 @@ import type { AgentKind, AgentTarget, ExecutionConfig, StepAgent, WorkflowColumn
 
 export const AGENT_KINDS: AgentKind[] = ["cursor", "claude", "studio", "cis"];
 
+export type StepColumnRef = { agent?: StepAgent; role?: WorkflowColumn["role"] };
+
 export type ResolvedStep = {
   kind: AgentKind;
   target: AgentTarget;
   label: string;
+  manual: boolean;
 };
+
+/** Human-only stage — no agent call. Explicit manual agent or collect-input role. */
+export function isManualStep(column?: StepColumnRef | null): boolean {
+  if (!column) return false;
+  if (column.agent === "manual") return true;
+  return column.role === "collect-input";
+}
 
 export function legacyDefaultAgent(exec?: Partial<ExecutionConfig> | null): AgentKind | undefined {
   if (!exec) return undefined;
@@ -18,16 +28,24 @@ export function legacyDefaultAgent(exec?: Partial<ExecutionConfig> | null): Agen
   return undefined;
 }
 
-export function resolveStep(
-  column: Pick<WorkflowColumn, "agent"> | null | undefined,
-  exec?: ExecutionConfig | null,
-): ResolvedStep {
+export function resolveStep(column: StepColumnRef | null | undefined, exec?: ExecutionConfig | null): ResolvedStep {
   const fallback: AgentKind = legacyDefaultAgent(exec) ?? exec?.defaultAgent ?? "cursor";
-  const kind: AgentKind =
-    column?.agent && column.agent !== "inherit" ? column.agent : fallback;
+  if (isManualStep(column)) {
+    return { kind: fallback, target: "local", label: "Manual", manual: true };
+  }
+  const agent = column?.agent;
+  const kind: AgentKind = agent && agent !== "inherit" && agent !== "manual" ? agent : fallback;
   const target: AgentTarget =
     kind === "cursor" ? (exec?.cursorTarget ?? "local") : kind === "claude" ? (exec?.claudeTarget ?? "local") : "remote";
-  return { kind, target, label: stepLabel(kind, target) };
+  return { kind, target, label: stepLabel(kind, target), manual: false };
+}
+
+/** Short badge for pipeline chrome — Manual, Cursor, Claude, etc. */
+export function stepBadge(column: StepColumnRef | null | undefined, exec?: ExecutionConfig | null): string | null {
+  if (!column) return null;
+  if (isManualStep(column)) return "Manual";
+  if (column.agent && column.agent !== "inherit") return shortAgent(resolveStep(column, exec).kind);
+  return null;
 }
 
 export function stepLabel(kind: AgentKind, target: AgentTarget): string {

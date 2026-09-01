@@ -1,5 +1,5 @@
 import { cn } from "@/lib/cn";
-import { formatSpend } from "@/lib/format";
+import { formatSpend, formatWhen } from "@/lib/format";
 import type { AgentResponse, WorkflowColumn } from "@/lib/types";
 
 function stageName(columnId: string, columns: WorkflowColumn[]) {
@@ -44,14 +44,28 @@ export function RunLog({
                   {r.usage.inputTokens}/{r.usage.outputTokens} tok{r.usage.estimated ? " est." : ""}
                 </span>
               ) : null}
-              <span className="ml-auto font-mono text-micro text-subtle">
-                {r.at.replace("T", " ").slice(11, 19)}
-              </span>
+              <span className="ml-auto font-mono text-micro text-subtle">{formatWhen(r.at)}</span>
             </div>
             <p className={cn("mt-1 text-sm", failed ? "text-danger" : "text-fg")}>{r.summary}</p>
+            {r.input ? (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-micro font-medium uppercase tracking-wide text-subtle">
+                  Prompt sent
+                </summary>
+                <pre
+                  className={cn(
+                    "mt-1 overflow-auto whitespace-pre-wrap font-mono text-2xs leading-relaxed text-muted",
+                    compact ? "max-h-24" : "max-h-80",
+                  )}
+                >
+                  {r.input}
+                </pre>
+              </details>
+            ) : null}
+            <p className="mt-2 text-micro font-medium uppercase tracking-wide text-subtle">Output</p>
             <pre
               className={cn(
-                "mt-2 overflow-auto whitespace-pre-wrap font-mono text-2xs leading-relaxed",
+                "mt-1 overflow-auto whitespace-pre-wrap font-mono text-2xs leading-relaxed",
                 failed ? "text-danger" : "text-muted",
                 compact ? "max-h-24" : "max-h-80",
               )}

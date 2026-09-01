@@ -12,6 +12,11 @@ import { Field, Code } from "@/components/studio/settings/field";
 import { PricingFields } from "@/components/studio/settings/PricingFields";
 import { mergePricing } from "@/lib/pricing";
 import { ConnectTab } from "@/components/studio/ConnectTab";
+import { createDefaultConnectors } from "@/lib/connectors";
+import { pullJiraIssue } from "@/lib/connectors-api";
+import { bindJiraKey, unbindJiraKey } from "@/lib/prompts";
+import { SEND_SLACK_COLUMN_ID } from "@/lib/columns";
+import { FlowSpecWarning } from "@/components/studio/FlowSpecWarning";
 
 const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Skills", "Connect", "Execution", "Look"] as const;
 type Tab = (typeof TABS)[number];
@@ -28,6 +33,7 @@ const ROLE_LABEL: Record<ColumnRole, string> = {
 const ROLES: ColumnRole[] = ["collect-input", "prompt", "review", "plan", "approve", "terminal"];
 const STEP_AGENTS: { id: StepAgent; label: string }[] = [
   { id: "inherit", label: "Inherit" },
+  { id: "manual", label: "Manual" },
   { id: "cursor", label: "Cursor" },
   { id: "claude", label: "Claude" },
   { id: "studio", label: "Studio" },
@@ -105,8 +111,13 @@ function TeamTab() {
   const removeMember = useBoardStore((s) => s.removeMember);
   const addLabel = useBoardStore((s) => s.addLabel);
   const removeLabel = useBoardStore((s) => s.removeLabel);
+  const setCatalog = useBoardStore((s) => s.setCatalog);
+  const removeCatalogIssue = useBoardStore((s) => s.removeCatalogIssue);
   const [member, setMember] = useState({ name: "", handle: "", role: "" });
   const [label, setLabel] = useState("");
+  const [jiraKey, setJiraKey] = useState("");
+  const [jiraMessage, setJiraMessage] = useState("");
+  const connectors = config.connectors ?? createDefaultConnectors();
 
   return (
     <div className="flex flex-col gap-5">
@@ -138,6 +149,60 @@ function TeamTab() {
           />
         </Field>
       </div>
+
+      <section>
+        <h3 className="mb-2 text-sm font-medium">Team Jira catalog</h3>
+        {connectors.jira.token ? (
+          <>
+            <div className="flex gap-2">
+              <Input className="font-mono" placeholder="X2-123" value={jiraKey} onChange={(e) => setJiraKey(e.target.value)} />
+              <Button
+                size="md"
+                disabled={!jiraKey.trim()}
+                onClick={async () => {
+                  const r = await pullJiraIssue({ data: { jira: connectors.jira, key: jiraKey } });
+                  if (r.ok && r.issue) {
+                    setCatalog({ issues: [r.issue, ...connectors.issues.filter((i) => i.key !== r.issue!.key)] });
+                    setJiraKey("");
+                    setJiraMessage(`Pulled ${r.issue.key}`);
+                  } else {
+                    setJiraMessage(r.error || "Could not pull Jira issue");
+                  }
+                }}
+              >
+                Pull
+              </Button>
+            </div>
+            {jiraMessage ? <p className="mt-1 text-2xs text-muted">{jiraMessage}</p> : null}
+            {connectors.issues.length ? (
+              <ul className="mt-2 flex flex-col gap-1">
+                {connectors.issues.map((issue) => (
+                  <li key={issue.key} className="flex min-h-11 items-center border border-border pl-2 text-sm">
+                    <span className="mr-2 font-mono text-2xs">{issue.key}</span>
+                    <span className="min-w-0 flex-1 truncate">{issue.title}</span>
+                    <button
+                      type="button"
+                      className="flex size-11 items-center justify-center text-subtle hover:text-danger"
+                      aria-label={`Delete ${issue.key} from Team catalog`}
+                      onClick={() => {
+                        if (window.confirm(`Delete ${issue.key} from the Team catalog and remove it from all prompts? Existing ticket links will remain.`)) {
+                          removeCatalogIssue(issue.key);
+                        }
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-2xs text-muted">Pull a key here or sync issues on Connect.</p>
+            )}
+          </>
+        ) : (
+          <p className="text-2xs text-muted">Set a Jira PAT on Connect to pull issues into the team catalog.</p>
+        )}
+      </section>
 
       <section>
         <h3 className="mb-2 text-sm font-medium">People</h3>
@@ -317,7 +382,7 @@ function FlowsTab() {
           checked={flow.autoRun}
           onChange={(e) => patchFlow({ autoRun: e.target.checked })}
         />
-        Keep running agent stages (skip reviews) until a human gate — notes, grill answers, or sign-off
+        Keep running agent stages without stopping to review or edit each payload
       </label>
       <Field label="After Done, continue in">
         <select
@@ -492,6 +557,12 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
             </div>
             <p className="mt-2 text-2xs text-muted">
               {ROLE_LABEL[col.role]}
+              {col.id === SEND_SLACK_COLUMN_ID ? (
+                <>
+                  {" · "}Cursor CLI posts via <span className="font-mono text-fg">slack-mcp</span> using{" "}
+                  <span className="font-mono text-fg">{"{{slackMessage}}"}</span>
+                </>
+              ) : null}
               {col.outputKey ? (
                 <>
                   {" · "}later stages read <span className="font-mono text-fg">{`{{${col.outputKey}}}`}</span>
@@ -516,11 +587,18 @@ function PromptsTab({ focusId, onFocus }: { focusId: string | null; onFocus: (id
   const columns = useBoardStore((s) => s.config.columns);
   const prompts = useBoardStore((s) => s.config.prompts) ?? [];
   const docs = useBoardStore((s) => s.config.docs);
+  const connectors = useBoardStore((s) => s.config.connectors) ?? createDefaultConnectors();
+  const issues = connectors.issues;
   const addPrompt = useBoardStore((s) => s.addPrompt);
   const updatePrompt = useBoardStore((s) => s.updatePrompt);
   const removePrompt = useBoardStore((s) => s.removePrompt);
   const updateColumn = useBoardStore((s) => s.updateColumn);
+  const setCatalog = useBoardStore((s) => s.setCatalog);
   const [id, setId] = useState(focusId || prompts[0]?.id || "");
+  const [jiraKey, setJiraKey] = useState("");
+  const [jiraMessage, setJiraMessage] = useState("");
+  const [jiraBusy, setJiraBusy] = useState(false);
+  const [addToCatalog, setAddToCatalog] = useState(true);
   const prompt = prompts.find((p) => p.id === (focusId || id)) ?? prompts.find((p) => p.id === id) ?? prompts[0];
 
   function select(next: string) {
@@ -534,6 +612,9 @@ function PromptsTab({ focusId, onFocus }: { focusId: string | null; onFocus: (id
   }
 
   const usedBy = columns.filter((c) => c.promptRef === prompt?.id);
+  const promptOnlyKeys = (prompt?.jiraKeys ?? []).filter(
+    (key) => !issues.some((issue) => issue.key.toUpperCase() === key.toUpperCase()),
+  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -565,6 +646,7 @@ function PromptsTab({ focusId, onFocus }: { focusId: string | null; onFocus: (id
             <Input value={prompt.name} onChange={(e) => updatePrompt(prompt.id, { name: e.target.value })} />
           </Field>
           <Field label="Prompt body (skills can be pasted here)">
+            {usedBy.length > 0 ? <FlowSpecWarning /> : null}
             <Textarea
               className="min-h-52 font-mono text-2xs"
               value={prompt.body}
@@ -605,6 +687,125 @@ function PromptsTab({ focusId, onFocus }: { focusId: string | null; onFocus: (id
             ) : (
               <p className="text-2xs text-muted">No skills yet. Add them on the Skills tab, or paste into the prompt body.</p>
             )}
+          </fieldset>
+          <fieldset className="rounded-md border border-border p-3">
+            <legend className="px-1 text-sm font-medium">Jira issues to include on run</legend>
+            <p className="mb-2 text-2xs text-muted">
+              These are combined with the ticket issues and available as {"{{jira}}"} and per-key tokens.
+            </p>
+            {connectors.jira.token ? (
+              <div className="mb-3 flex flex-col gap-2 border-b border-border pb-3">
+                <div className="flex gap-2">
+                  <Input
+                    className="font-mono uppercase"
+                    placeholder="X2-123"
+                    value={jiraKey}
+                    onChange={(e) => setJiraKey(e.target.value)}
+                  />
+                  <Button
+                    size="md"
+                    disabled={jiraBusy || !jiraKey.trim()}
+                    onClick={async () => {
+                      setJiraBusy(true);
+                      setJiraMessage("");
+                      try {
+                        const result = await pullJiraIssue({ data: { jira: connectors.jira, key: jiraKey } });
+                        if (!result.ok || !result.issue) {
+                          setJiraMessage(result.error || "Could not pull Jira issue");
+                          return;
+                        }
+                        updatePrompt(prompt.id, { jiraKeys: bindJiraKey(prompt.jiraKeys, result.issue.key) });
+                        if (addToCatalog) {
+                          setCatalog({
+                            issues: [
+                              result.issue,
+                              ...issues.filter((issue) => issue.key.toUpperCase() !== result.issue!.key.toUpperCase()),
+                            ],
+                          });
+                        }
+                        setJiraKey("");
+                        setJiraMessage(
+                          `${result.issue.key} added to this prompt${addToCatalog ? " and the Team catalog" : " only"}`,
+                        );
+                      } catch (error) {
+                        setJiraMessage(error instanceof Error ? error.message : "Could not pull Jira issue");
+                      } finally {
+                        setJiraBusy(false);
+                      }
+                    }}
+                  >
+                    {jiraBusy ? "Pulling…" : "Pull"}
+                  </Button>
+                </div>
+                <label className="flex min-h-11 items-center gap-2 text-2xs text-muted">
+                  <input
+                    type="checkbox"
+                    checked={addToCatalog}
+                    onChange={(e) => setAddToCatalog(e.target.checked)}
+                  />
+                  Also add this Jira to the Team catalog
+                </label>
+                {jiraMessage ? <p className="text-2xs text-muted">{jiraMessage}</p> : null}
+              </div>
+            ) : (
+              <p className="mb-3 text-2xs text-muted">Set a Jira PAT on Connect to pull another issue directly into this prompt.</p>
+            )}
+            {issues.length ? (
+              <ul className="flex flex-col gap-1">
+                {issues.map((issue) => {
+                  const on = (prompt.jiraKeys ?? []).some((key) => key.toUpperCase() === issue.key.toUpperCase());
+                  return (
+                    <li key={issue.key} className="flex min-h-11 items-center">
+                      <label className="flex min-w-0 flex-1 items-center gap-3 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          onChange={(e) => {
+                            updatePrompt(prompt.id, {
+                              jiraKeys: e.target.checked
+                                ? bindJiraKey(prompt.jiraKeys, issue.key)
+                                : unbindJiraKey(prompt.jiraKeys, issue.key),
+                            });
+                          }}
+                        />
+                        <span className="font-mono text-2xs">{issue.key}</span>
+                        <span className="truncate">{issue.title}</span>
+                      </label>
+                      {on ? (
+                        <button
+                          type="button"
+                          className="flex size-11 shrink-0 items-center justify-center text-subtle hover:text-danger"
+                          aria-label={`Remove ${issue.key} from this prompt`}
+                          onClick={() => updatePrompt(prompt.id, { jiraKeys: unbindJiraKey(prompt.jiraKeys, issue.key) })}
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-2xs text-muted">No Jira issues in the team catalog yet.</p>
+            )}
+            {promptOnlyKeys.length ? (
+              <ul className="mt-2 flex flex-col gap-1 border-t border-border pt-2">
+                {promptOnlyKeys.map((key) => (
+                  <li key={key} className="flex min-h-11 items-center gap-2 text-sm">
+                    <span className="font-mono text-2xs">{key}</span>
+                    <span className="min-w-0 flex-1 text-2xs text-muted">Prompt only</span>
+                    <button
+                      type="button"
+                      className="flex size-11 items-center justify-center text-subtle hover:text-danger"
+                      aria-label={`Remove ${key} from this prompt`}
+                      onClick={() => updatePrompt(prompt.id, { jiraKeys: unbindJiraKey(prompt.jiraKeys, key) })}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </fieldset>
           <Field label="GenAI Studio prompt ID (optional override)">
             <Input
@@ -1135,6 +1336,13 @@ function ExecutionTab() {
           className="font-mono"
           value={String(exec.timeoutMs)}
           onChange={(e) => patch({ timeoutMs: Number(e.target.value) || 120000 })}
+        />
+      </Field>
+      <Field label="Stage timeout (minutes) — non-interactive agent runs">
+        <Input
+          className="font-mono"
+          value={String(Math.round((exec.stageTimeoutMs ?? 300000) / 60000))}
+          onChange={(e) => patch({ stageTimeoutMs: (Number(e.target.value) || 5) * 60000 })}
         />
       </Field>
       <label className="flex min-h-11 items-center gap-3 text-sm">

@@ -1,6 +1,44 @@
 import type { TeamDoc, TeamPrompt, WorkflowColumn } from "./types";
+import { NOTIFY_PROMPT_TEMPLATE, SEND_SLACK_COLUMN_ID } from "./columns.ts";
+import { loadDiscoveryFlowSpec } from "./flow-spec.ts";
 
 const FRY_COLUMN_ID = "fry";
+const NOTIFY_PROMPT_ID = `prompt-${SEND_SLACK_COLUMN_ID}`;
+
+export function canonicalizeNotifyPrompt(prompt: TeamPrompt): TeamPrompt {
+  if (prompt.id !== NOTIFY_PROMPT_ID) return prompt;
+  return { ...prompt, body: NOTIFY_PROMPT_TEMPLATE };
+}
+
+/** Combined system + user text shown in the prompt library for a JSON-backed stage. */
+export function flowStagePromptBody(stageId: string): string | undefined {
+  const stage = loadDiscoveryFlowSpec().stages.find((s) => s.id === stageId);
+  if (!stage?.prompt) return undefined;
+  return [stage.prompt.system, stage.prompt.user].filter((part) => part?.trim()).join("\n\n");
+}
+
+/**
+ * flows/discovery.flow.json is the source of truth for stage prompts. Any saved
+ * library body for a JSON-backed stage is stale — overwrite it on merge so the
+ * Settings UI matches what actually runs. In-app edits are session-only by design.
+ */
+export function canonicalizeFlowPrompts(prompts: TeamPrompt[]): TeamPrompt[] {
+  return prompts.map((prompt) => {
+    const body = flowStagePromptBody(prompt.id.replace(/^prompt-/, ""));
+    return body !== undefined ? { ...prompt, body } : prompt;
+  });
+}
+
+export function bindJiraKey(keys: string[] | undefined, key: string): string[] {
+  const normalized = key.trim().toUpperCase();
+  if (!normalized) return keys ?? [];
+  return [...(keys ?? []).filter((value) => value.toUpperCase() !== normalized), normalized];
+}
+
+export function unbindJiraKey(keys: string[] | undefined, key: string): string[] {
+  const normalized = key.trim().toUpperCase();
+  return (keys ?? []).filter((value) => value.toUpperCase() !== normalized);
+}
 
 export function promptIdForColumn(columnId: string): string {
   return `prompt-${columnId}`;
@@ -15,6 +53,7 @@ export function createDefaultPrompts(columns: WorkflowColumn[]): TeamPrompt[] {
       body: c.promptTemplate || "",
       studioPromptId: c.promptId,
       skillIds: c.id === FRY_COLUMN_ID ? ["doc-grill-me"] : [],
+      jiraKeys: [],
     }));
 }
 
@@ -27,7 +66,7 @@ export function stampPromptRefs(columns: WorkflowColumn[]): WorkflowColumn[] {
 
 export function mergePrompts(saved?: TeamPrompt[], columns: WorkflowColumn[] = []): TeamPrompt[] {
   const seeded = createDefaultPrompts(columns);
-  if (!saved?.length) return seeded;
+  if (!saved?.length) return canonicalizeFlowPrompts(seeded);
   const byId = new Map(saved.map((p) => [p.id, p]));
   const merged = seeded.map((d) => {
     const hit = byId.get(d.id);
@@ -37,25 +76,28 @@ export function mergePrompts(saved?: TeamPrompt[], columns: WorkflowColumn[] = [
       ...hit,
       id: d.id,
       skillIds: Array.isArray(hit.skillIds) ? hit.skillIds : d.skillIds,
+      jiraKeys: Array.isArray(hit.jiraKeys) ? hit.jiraKeys : d.jiraKeys,
     };
   });
   for (const p of saved) {
-    if (!merged.some((m) => m.id === p.id)) merged.push({ ...p, skillIds: p.skillIds ?? [] });
+    if (!merged.some((m) => m.id === p.id)) merged.push({ ...p, skillIds: p.skillIds ?? [], jiraKeys: p.jiraKeys ?? [] });
   }
-  return merged;
+  return canonicalizeFlowPrompts(merged.map(canonicalizeNotifyPrompt));
 }
 
 export function resolveStagePrompt(
   col: WorkflowColumn | undefined,
   prompts: TeamPrompt[] | undefined,
   docs: TeamDoc[] | undefined,
-): { body: string; studioPromptId?: string; docs: TeamDoc[] } {
+): { body: string; studioPromptId?: string; docs: TeamDoc[]; jiraKeys: string[] } {
   const list = prompts ?? [];
   const library = docs ?? [];
   const p =
     (col?.promptRef ? list.find((x) => x.id === col.promptRef) : undefined) ??
     (col ? list.find((x) => x.id === promptIdForColumn(col.id)) : undefined);
-  const body = p?.body ?? col?.promptTemplate ?? "";
+  const baseBody =
+    col?.id === SEND_SLACK_COLUMN_ID ? NOTIFY_PROMPT_TEMPLATE : (p?.body ?? col?.promptTemplate ?? "");
+  const body = baseBody;
   const skillIds = p?.skillIds ?? [];
   const attached = skillIds
     .map((id) => library.find((d) => d.id === id))
@@ -67,5 +109,6 @@ export function resolveStagePrompt(
     body: `${body}${skillBlock}`.trim(),
     studioPromptId: p?.studioPromptId || col?.promptId,
     docs: attached.length ? attached : library,
+    jiraKeys: p?.jiraKeys ?? [],
   };
 }

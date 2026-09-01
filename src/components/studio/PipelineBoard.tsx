@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
 import { DISCOVERY_FLOW_ID, BLOCKED_COLUMN_ID } from "@/lib/columns";
-import { resolveStep, shortAgent } from "@/lib/agents";
+import { isManualStep, resolveStep, stepBadge } from "@/lib/agents";
 import { ExecutionTrail } from "./ExecutionTrail";
 import { TicketNote } from "./TicketNote";
 
@@ -34,13 +34,18 @@ export function PipelineBoard() {
             inFlow.map((t) => t.outputs[col.id]).find((v) => v?.trim()) ||
             "";
           const step = resolveStep(col, execution);
-          const agent = col.agent && col.agent !== "inherit" ? shortAgent(step.kind) : null;
+          const badge = stepBadge(col, execution);
           const failed =
             col.id === BLOCKED_COLUMN_ID
               ? here.length > 0
               : here.some((t) => t.status === "blocked") ||
                 inFlow.some((t) => t.agentResponses.some((r) => r.columnId === col.id && r.ok === false));
-          const runnable = col.role === "prompt" || col.role === "plan" || col.role === "review" || col.role === "approve";
+          const runnable =
+            col.role === "prompt" ||
+            col.role === "plan" ||
+            col.role === "review" ||
+            col.role === "approve" ||
+            isManualStep(col);
           const busy = here.some((t) => t.status === "executing");
 
           return (
@@ -70,7 +75,7 @@ export function PipelineBoard() {
                     <h2 className="truncate font-serif text-lg font-medium leading-tight tracking-tight">{col.name}</h2>
                     <p className="text-micro uppercase tracking-widest text-subtle">
                       {col.role.replace("-", " ")}
-                      {agent ? ` · ${agent}` : col.role === "prompt" || col.role === "plan" ? ` · ${step.label}` : ""}
+                      {badge ? ` · ${badge}` : !step.manual && (col.role === "prompt" || col.role === "plan") ? ` · ${step.label}` : ""}
                       {col.outputKey ? ` · {{${col.outputKey}}}` : ""}
                     </p>
                   </div>
@@ -95,14 +100,14 @@ export function PipelineBoard() {
                     size="md"
                     className="mt-3 w-full"
                     disabled={busy}
-                    title={`Run ${step.label} — creates a ticket if this column is empty`}
+                    title={step.manual ? "Save human input for this stage" : `Run ${step.label} — creates a ticket if this column is empty`}
                     onClick={() => {
                       setActiveStage(col.id);
                       void runColumn(col.id);
                     }}
                   >
                     <Play className="size-3.5 fill-current" />
-                    {busy ? "Running…" : here.length === 0 ? `Start · ${step.label}` : `Run ${step.label}`}
+                    {busy ? "Running…" : here.length === 0 ? `Start · ${step.label}` : step.manual ? "Save & continue" : `Run ${step.label}`}
                   </Button>
                 ) : null}
                 {runnable && here.length === 0 ? (

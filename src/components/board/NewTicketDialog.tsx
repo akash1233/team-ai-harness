@@ -6,6 +6,7 @@ import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { nextKey } from "@/lib/format";
 import { createDefaultConnectors, type LinkedJira, type LinkedRepo } from "@/lib/connectors";
+import { pullJiraIssue } from "@/lib/connectors-api";
 
 export function NewTicketDialog({
   open,
@@ -21,10 +22,17 @@ export function NewTicketDialog({
   const connectors = useBoardStore((s) => s.config.connectors) ?? createDefaultConnectors();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [issueKey, setIssueKey] = useState("");
+  const setCatalog = useBoardStore((s) => s.setCatalog);
+  const [issueKeys, setIssueKeys] = useState<string[]>([]);
+  const [pullKey, setPullKey] = useState("");
+  const [pulling, setPulling] = useState(false);
   const [repoName, setRepoName] = useState("");
   const preview = nextKey(tickets.map((t) => t.key), prefix);
-  const issue: LinkedJira | undefined = connectors.issues.find((i) => i.key === issueKey);
+  const issues: LinkedJira[] = issueKeys.flatMap((key) => {
+    const issue = connectors.issues.find((i) => i.key === key);
+    return issue ? [issue] : [];
+  });
+  const issue = issues[0];
   const repo: LinkedRepo | undefined = connectors.repos.find((r) => r.fullName === repoName);
 
   function submit(e: FormEvent) {
@@ -33,14 +41,14 @@ export function NewTicketDialog({
     if (!summary) return;
     addTicket({
       title: summary,
-      description: description.trim() || issue?.description || "",
+      description: description.trim(),
       key: issue?.key,
-      linkedJira: issue,
+      linkedJiras: issues,
       linkedRepo: repo,
     });
     setTitle("");
     setDescription("");
-    setIssueKey("");
+    setIssueKeys([]);
     setRepoName("");
     onOpenChange(false);
   }
@@ -62,30 +70,49 @@ export function NewTicketDialog({
             </Dialog.Close>
           </div>
           <form onSubmit={submit} className="flex flex-col gap-3">
-            {connectors.issues.length ? (
-              <label className="block">
-                <span className="mb-1 block text-2xs text-muted">Jira issue</span>
-                <select
-                  className="h-11 w-full rounded-md border border-border bg-inset px-2 text-sm"
-                  value={issueKey}
-                  onChange={(e) => {
-                    const next = connectors.issues.find((i) => i.key === e.target.value);
-                    setIssueKey(e.target.value);
-                    if (next) {
-                      setTitle(next.title);
-                      setDescription(next.description);
-                    }
-                  }}
-                >
-                  <option value="">None — type a summary</option>
-                  {connectors.issues.map((i) => (
-                    <option key={i.key} value={i.key}>
-                      {i.key} {i.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
+            <fieldset className="rounded-md border border-border p-2">
+              <legend className="px-1 text-2xs text-muted">Jira issues</legend>
+              {connectors.issues.map((i) => (
+                <label key={i.key} className="flex min-h-9 items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={issueKeys.includes(i.key)}
+                    onChange={(e) => {
+                      const next = e.target.checked ? [...issueKeys, i.key] : issueKeys.filter((key) => key !== i.key);
+                      setIssueKeys(next);
+                      if (e.target.checked && next.length === 1 && !title.trim()) {
+                        setTitle(i.title);
+                      }
+                    }}
+                  />
+                  <span className="font-mono text-2xs">{i.key}</span>
+                  <span className="truncate">{i.title}</span>
+                </label>
+              ))}
+              {connectors.jira.token ? (
+                <div className="mt-2 flex gap-1">
+                  <Input className="font-mono" placeholder="X2-123" value={pullKey} onChange={(e) => setPullKey(e.target.value)} />
+                  <Button
+                    type="button"
+                    size="md"
+                    disabled={pulling || !pullKey.trim()}
+                    onClick={async () => {
+                      setPulling(true);
+                      const r = await pullJiraIssue({ data: { jira: connectors.jira, key: pullKey } });
+                      setPulling(false);
+                      if (!r.ok || !r.issue) return;
+                      setCatalog({ issues: [r.issue, ...connectors.issues.filter((i) => i.key !== r.issue!.key)] });
+                      setIssueKeys((current) => current.includes(r.issue!.key) ? current : [...current, r.issue!.key]);
+                      setPullKey("");
+                    }}
+                  >
+                    {pulling ? "…" : "Pull"}
+                  </Button>
+                </div>
+              ) : (
+                <p className="mt-1 text-2xs text-muted">Set a Jira PAT on Connect to pull by key.</p>
+              )}
+            </fieldset>
             {connectors.repos.length ? (
               <label className="block">
                 <span className="mb-1 block text-2xs text-muted">GitHub repo</span>

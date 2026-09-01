@@ -1,3 +1,5 @@
+import { extractNotifyMcpResult } from "./discovery-slack.ts";
+
 /** Non-interactive flags so Cursor/Claude do not block on a TTY trust prompt. */
 export function withNonInteractiveFlags(
   kind: "cursor" | "claude",
@@ -132,8 +134,105 @@ export function sessionShouldStop(text: string): boolean {
   );
 }
 
+export const LONG_SESSION_HARD_CAP_MS = 45 * 60 * 1000;
+export const LONG_SESSION_IDLE_MS = 20_000;
+export const NOTIFY_MCP_SETTLE_MS = 15_000;
+
+/** Notify auto-harvest delay after MCP success keywords (ms). Override via PIT_NOTIFY_MCP_SETTLE_MS. */
+export function notifyMcpSettleMs(): number {
+  const raw = process.env.PIT_NOTIFY_MCP_SETTLE_MS?.trim();
+  if (!raw) return NOTIFY_MCP_SETTLE_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : NOTIFY_MCP_SETTLE_MS;
+}
+
+export function sessionExitLineInLog(log: string): boolean {
+  return /\[kindling\] exit \d+/.test(stripAnsi(log));
+}
+
+/** Heuristic: Cursor agent likely posted via slack-mcp slack_write. */
+export function notifyPostSucceeded(log: string): boolean {
+  return extractNotifyMcpResult(log).found;
+}
+
+export type SessionSnap = {
+  log: string;
+  exitCode: number | null;
+  startedAt: number;
+  mtimeMs?: number;
+};
+
+export function evaluateLongSessionPoll(
+  snap: SessionSnap,
+  opts?: { columnId?: string; hasSlackMessage?: boolean; notifyMcpSeenAt?: number },
+): { done: boolean; ok: boolean; error?: string } {
+  const age = Date.now() - snap.startedAt;
+  const log = snap.log;
+
+  if (sessionShouldStop(log)) {
+    return { done: true, ok: false, error: explainCliFailure(log) };
+  }
+  if (snap.exitCode !== null) {
+    const ok = snap.exitCode === 0 && !isNoiseLog(log);
+    return {
+      done: true,
+      ok,
+      error: ok ? undefined : explainCliFailure(log) || `exit ${snap.exitCode}`,
+    };
+  }
+  if (sessionExitLineInLog(log)) {
+    const code = Number(log.match(/\[kindling\] exit (\d+)/)?.[1] ?? 0);
+    const ok = code === 0 && !isNoiseLog(log);
+    return {
+      done: true,
+      ok,
+      error: ok ? undefined : explainCliFailure(log) || `exit ${code}`,
+    };
+  }
+  if (notifyPostSucceeded(log)) {
+    if (opts?.columnId === "send-slack" && opts.notifyMcpSeenAt !== undefined) {
+      if (Date.now() - opts.notifyMcpSeenAt < notifyMcpSettleMs()) {
+        return { done: false, ok: true };
+      }
+    }
+    return { done: true, ok: true };
+  }
+
+  const mtime = snap.mtimeMs ?? snap.startedAt;
+  const idle = Date.now() - mtime > LONG_SESSION_IDLE_MS;
+
+  if (opts?.columnId !== "send-slack" && idle && log.length > 200 && !isNoiseLog(log)) {
+    return { done: true, ok: true };
+  }
+  if (age > LONG_SESSION_HARD_CAP_MS) {
+    return {
+      done: true,
+      ok: false,
+      error: "Terminal session exceeded 45 minutes — click Done to harvest or re-run.",
+    };
+  }
+  return { done: false, ok: true };
+}
+
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export function formatKindlingTerminalTitle(label: string): string {
+  return `Kindling — ${label}`;
+}
+
+export function sanitizeTerminalScriptName(title: string): string {
+  const clean = title
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/[/\\]/g, "-")
+    .trim();
+  const name = clean || "run";
+  return name.length > 60 ? name.slice(0, 60).trim() : name;
+}
+
+export function bashSetTerminalTitle(title: string): string {
+  return `printf '\\033]0;%s\\007' ${shellQuote(title)}`;
 }
 
 export function cleanEnv(): NodeJS.ProcessEnv {
@@ -196,6 +295,18 @@ export async function readIfExists(file: string): Promise<string> {
   }
 }
 
+/** Records when Notify MCP success keywords first appeared in a Terminal session. */
+export async function ensureNotifyMcpSeenAt(sessionDir: string): Promise<number> {
+  const path = await import("node:path");
+  const fs = await import("node:fs/promises");
+  const file = path.join(sessionDir, "notify-mcp-seen.txt");
+  const existing = await readIfExists(file);
+  if (existing) return Number(existing) || Date.now();
+  const now = Date.now();
+  await fs.writeFile(file, String(now));
+  return now;
+}
+
 export function isNoiseLog(log: string): boolean {
   const lines = stripAnsi(log)
     .split("\n")
@@ -211,6 +322,7 @@ export async function startMacSession(
   bin: string,
   args: string[],
   prompt?: string,
+  opts?: { title?: string },
 ): Promise<{ dir: string; outFile: string; codeFile: string }> {
   const fs = await import("node:fs/promises");
   const os = await import("node:os");
@@ -218,7 +330,8 @@ export async function startMacSession(
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "kindling-"));
   const outFile = path.join(dir, "out.txt");
   const codeFile = path.join(dir, "code.txt");
-  const script = path.join(dir, "run.command");
+  const scriptName = opts?.title ? `${sanitizeTerminalScriptName(opts.title)}.command` : "run.command";
+  const script = path.join(dir, scriptName);
   const promptFile = path.join(dir, "prompt.md");
   const startedFile = path.join(dir, "started.txt");
   await fs.writeFile(startedFile, String(Date.now()));
@@ -228,16 +341,16 @@ export async function startMacSession(
     outFile,
     `[kindling] ${new Date().toISOString()} starting\n[kindling] cwd ${cwd}\n[kindling] ${bin} ${args.join(" ")}${prompt !== undefined ? " $(cat prompt.md)" : ""}\n${prompt !== undefined ? `[kindling] prompt: ${prompt.slice(0, 240).replace(/\n/g, " ")}\n` : ""}`,
   );
+  const titleLine = opts?.title ? `${bashSetTerminalTitle(opts.title)}\n` : "";
   const body = `#!/bin/bash
 unset npm_config_prefix
 unset NPM_CONFIG_PREFIX
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-set -o pipefail
+${titleLine}set -o pipefail
+trap 'ec=$?; echo $ec > ${codeFile}; echo "[kindling] exit $ec" | tee -a ${outFile}' EXIT
 cd ${shellQuote(cwd)}
 echo "[kindling] $(date -u +%H:%M:%S) print session in $(pwd)" | tee -a ${shellQuote(outFile)}
 ${shellQuote(bin)} ${args.map(shellQuote).join(" ")}${promptArg} 2>&1 | tee -a ${shellQuote(outFile)}
-echo $? > ${shellQuote(codeFile)}
-echo "[kindling] $(date -u +%H:%M:%S) exit $(cat ${shellQuote(codeFile)})" | tee -a ${shellQuote(outFile)}
 `;
   await fs.writeFile(script, body, { mode: 0o755 });
   const opened = await runProcess("open", ["-g", "-a", "Terminal", script], 8000);
@@ -248,19 +361,24 @@ echo "[kindling] $(date -u +%H:%M:%S) exit $(cat ${shellQuote(codeFile)})" | tee
   return { dir, outFile, codeFile };
 }
 
-export async function readSession(dir: string): Promise<{
-  log: string;
-  exitCode: number | null;
-  startedAt: number;
-}> {
+export async function readSession(dir: string): Promise<SessionSnap> {
+  const fs = await import("node:fs/promises");
   const path = await import("node:path");
-  const raw = await readIfExists(path.join(dir, "out.txt"));
+  const outPath = path.join(dir, "out.txt");
+  const raw = await readIfExists(outPath);
   const codeText = await readIfExists(path.join(dir, "code.txt"));
   const started = Number(await readIfExists(path.join(dir, "started.txt"))) || Date.now();
+  let mtimeMs = started;
+  try {
+    mtimeMs = (await fs.stat(outPath)).mtimeMs;
+  } catch {
+    /* no log yet */
+  }
   return {
     log: stripAnsi(raw),
     exitCode: codeText === "" ? null : Number(codeText),
     startedAt: started,
+    mtimeMs,
   };
 }
 
@@ -273,8 +391,9 @@ export async function runInMacTerminal(
   args: string[],
   timeoutMs: number,
   prompt?: string,
+  terminalTitle?: string,
 ): Promise<{ code: number | null; out: string; err: string }> {
-  const { dir } = await startMacSession(cwd, bin, args, prompt);
+  const { dir } = await startMacSession(cwd, bin, args, prompt, terminalTitle ? { title: terminalTitle } : undefined);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const snap = await readSession(dir);
@@ -308,10 +427,18 @@ export async function runAgentProcess(opts: {
   inTerminal: boolean;
   fullAgent?: boolean;
   prompt?: string;
+  terminalTitle?: string;
 }): Promise<{ code: number | null; out: string; err: string; via: "terminal" | "spawn" }> {
   const args = opts.fullAgent ? opts.args : withoutFullAgentMode(opts.args);
   if (opts.inTerminal && process.platform === "darwin") {
-    const r = await runInMacTerminal(opts.cwd, opts.bin, args, opts.timeoutMs, opts.prompt);
+    const r = await runInMacTerminal(
+      opts.cwd,
+      opts.bin,
+      args,
+      opts.timeoutMs,
+      opts.prompt,
+      opts.terminalTitle,
+    );
     return { ...r, out: stripAnsi(r.out), err: stripAnsi(r.err), via: "terminal" };
   }
   const argv = opts.prompt !== undefined ? [...args, opts.prompt] : args;
@@ -328,6 +455,7 @@ export async function startInteractiveSession(
   bin: string,
   args: string[],
   prompt: string,
+  opts?: { title?: string },
 ): Promise<{ dir: string; outFile: string; codeFile: string }> {
   const fs = await import("node:fs/promises");
   const os = await import("node:os");
@@ -336,7 +464,8 @@ export async function startInteractiveSession(
   const outFile = path.join(dir, "out.txt");
   const codeFile = path.join(dir, "code.txt");
   const promptFile = path.join(dir, "prompt.md");
-  const script = path.join(dir, "run.command");
+  const scriptName = opts?.title ? `${sanitizeTerminalScriptName(opts.title)}.command` : "run.command";
+  const script = path.join(dir, scriptName);
   await fs.writeFile(path.join(dir, "started.txt"), String(Date.now()));
   await fs.writeFile(promptFile, prompt);
   await fs.writeFile(
@@ -344,15 +473,15 @@ export async function startInteractiveSession(
     `[kindling] ${new Date().toISOString()} long stage\n[kindling] ${bin} ${args.join(" ")} $(cat prompt.md)\n`,
   );
   const inner = `cd ${shellQuote(cwd)} && ${shellQuote(bin)} ${args.map(shellQuote).join(" ")} "$(cat ${shellQuote(promptFile)})"`;
+  const titleLine = opts?.title ? `${bashSetTerminalTitle(opts.title)}\n` : "";
   const body = `#!/bin/bash
 unset npm_config_prefix
 unset NPM_CONFIG_PREFIX
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+${titleLine}trap 'ec=$?; echo $ec > ${codeFile}; echo "[kindling] exit $ec" | tee -a ${outFile}' EXIT
 cd ${shellQuote(cwd)}
 echo "[kindling] $(date -u +%H:%M:%S) interactive stage — answer prompts here. Close when done." | tee -a ${shellQuote(outFile)}
 script -q -F ${shellQuote(outFile)} /bin/bash -c ${shellQuote(inner)}
-echo $? > ${shellQuote(codeFile)}
-echo "[kindling] $(date -u +%H:%M:%S) exit $(cat ${shellQuote(codeFile)})" | tee -a ${shellQuote(outFile)}
 `;
   await fs.writeFile(script, body, { mode: 0o755 });
   const opened = await runProcess("open", ["-g", "-a", "Terminal", script], 8000);

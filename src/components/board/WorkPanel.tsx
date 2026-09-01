@@ -5,14 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { columnById } from "@/lib/columns";
-import { mentionedKeys, outputVarName } from "@/lib/flow-context";
-import { resolveStagePrompt } from "@/lib/prompts";
-import { channelLabel, formatSpend } from "@/lib/format";
-import { resolveStep } from "@/lib/agents";
+import { buildContext, outputVarName } from "@/lib/flow-context";
+import { flowStageMentionedKeys, getFlowStage } from "@/lib/flow-spec";
+import { formatSpend } from "@/lib/format";
+import { isManualStep, resolveStep } from "@/lib/agents";
 import { formatGrillRecord } from "@/lib/grill";
 import { GrillRoom } from "@/components/studio/GrillRoom";
 import { RunLog } from "@/components/studio/RunLog";
-import type { Ticket } from "@/lib/types";
+import { PayloadEditor, useStagePayload } from "@/components/studio/PayloadEditor";
+import type { Ticket, WorkflowColumn } from "@/lib/types";
 import { createDefaultConnectors } from "@/lib/connectors";
 import { pullJiraIssue } from "@/lib/connectors-api";
 
@@ -51,7 +52,9 @@ export function WorkPanel() {
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <p className="mb-4 text-sm leading-relaxed text-muted">{ticket.description}</p>
+        {ticket.columnId !== "ideation" && ticket.description ? (
+          <p className="mb-4 text-sm leading-relaxed text-muted">{ticket.description}</p>
+        ) : null}
         {ticket.status === "blocked" && ticket.blockedReason ? (
           <pre className="mb-4 overflow-auto whitespace-pre-wrap rounded-md border border-danger/50 bg-danger/5 p-3 font-mono text-2xs text-danger">
             {ticket.blockedReason}
@@ -72,6 +75,7 @@ export function WorkPanel() {
 function ContextAttach({ ticket }: { ticket: Ticket }) {
   const connectors = useBoardStore((s) => s.config.connectors) ?? createDefaultConnectors();
   const attachJira = useBoardStore((s) => s.attachJira);
+  const detachJira = useBoardStore((s) => s.detachJira);
   const attachRepo = useBoardStore((s) => s.attachRepo);
   const setCatalog = useBoardStore((s) => s.setCatalog);
   const [key, setKey] = useState("");
@@ -93,9 +97,9 @@ function ContextAttach({ ticket }: { ticket: Ticket }) {
     <section className="mb-4 rounded-md border border-border px-3 py-2">
       <p className="text-micro uppercase tracking-widest text-subtle">Jira & repo</p>
       <p className="mt-1 text-2xs text-muted">
-        {ticket.linkedJira ? (
+        {ticket.linkedJiras.length ? (
           <>
-            Jira <span className="font-mono text-fg">{ticket.linkedJira.key}</span> flows as {"{{jira.key}}"} / {"{{jira.description}}"}
+            Jira <span className="font-mono text-fg">{ticket.linkedJiras.map((issue) => issue.key).join(", ")}</span> flows as {"{{jira}}"}; the first also fills {"{{jira.key}}"}
           </>
         ) : (
           "No Jira attached — pull a key or pick from sync."
@@ -108,29 +112,30 @@ function ContextAttach({ ticket }: { ticket: Ticket }) {
         ) : null}
       </p>
       <div className="mt-2 flex flex-wrap gap-2">
-        {connectors.issues.length ? (
-          <select
-            className="h-11 min-w-40 flex-1 rounded-md border border-border bg-inset px-2 text-sm"
-            value={ticket.linkedJira?.key ?? ""}
-            onChange={(e) => {
-              const hit = connectors.issues.find((i) => i.key === e.target.value);
-              if (hit) attachJira(ticket.id, hit);
-            }}
-          >
-            <option value="">Jira issue…</option>
-            {connectors.issues.map((i) => (
-              <option key={i.key} value={i.key}>
-                {i.key} {i.title}
-              </option>
-            ))}
-          </select>
-        ) : null}
-        <div className="flex min-w-40 flex-1 gap-1">
-          <Input className="font-mono" placeholder="X2-698" value={key} onChange={(e) => setKey(e.target.value)} />
-          <Button type="button" size="md" disabled={busy || !key.trim()} onClick={() => void pull()}>
-            {busy ? "…" : "Pull"}
-          </Button>
-        </div>
+        {connectors.issues.map((issue) => {
+          const on = ticket.linkedJiras.some((linked) => linked.key === issue.key);
+          return (
+            <label key={issue.key} className="flex min-h-11 items-center gap-2 rounded-md border border-border px-2 text-sm">
+              <input
+                type="checkbox"
+                checked={on}
+                onChange={(e) => e.target.checked ? attachJira(ticket.id, issue) : detachJira(ticket.id, issue.key)}
+              />
+              <span className="font-mono text-2xs">{issue.key}</span>
+              <span className="max-w-40 truncate">{issue.title}</span>
+            </label>
+          );
+        })}
+        {connectors.jira.token ? (
+          <div className="flex min-w-40 flex-1 gap-1">
+            <Input className="font-mono" placeholder="X2-698" value={key} onChange={(e) => setKey(e.target.value)} />
+            <Button type="button" size="md" disabled={busy || !key.trim()} onClick={() => void pull()}>
+              {busy ? "…" : "Pull"}
+            </Button>
+          </div>
+        ) : (
+          <p className="self-center text-2xs text-muted">Set a Jira PAT on Connect to pull by key.</p>
+        )}
         {connectors.repos.length ? (
           <select
             className="h-11 min-w-40 flex-1 rounded-md border border-border bg-inset px-2 text-sm"
@@ -154,11 +159,14 @@ function ContextAttach({ ticket }: { ticket: Ticket }) {
 }
 
 function FlowVars({ ticket }: { ticket: Ticket }) {
+  if (ticket.columnId === "ideation") return null;
   const config = useBoardStore((s) => s.config);
   const col = columnById(ticket.columnId, config.columns);
-  const resolved = resolveStagePrompt(col, config.prompts, config.docs);
+  const stage = getFlowStage(ticket.columnId);
   const writes = outputVarName(col);
-  const uses = mentionedKeys(resolved.body).filter((k) => !k.startsWith("ticket."));
+  const uses = stage?.prompt
+    ? flowStageMentionedKeys(stage).filter((k) => !k.startsWith("ticket."))
+    : [];
   const filled = Object.entries(ticket.vars ?? {}).filter(([, v]) => v.trim());
   if (!writes && uses.length === 0 && filled.length === 0) return null;
   return (
@@ -188,17 +196,42 @@ function FlowVars({ ticket }: { ticket: Ticket }) {
   );
 }
 
+function ResolvedVars({ ticket }: { ticket: Ticket }) {
+  const stage = getFlowStage(ticket.columnId);
+  if (!stage?.prompt) return null;
+  const keys = flowStageMentionedKeys(stage);
+  if (!keys.length) return null;
+  const ctx = buildContext(ticket);
+  return (
+    <section className="rounded-md border border-border bg-inset px-3 py-2">
+      <p className="text-micro uppercase tracking-widest text-subtle">Values sent to the agent</p>
+      <ul className="mt-1 flex flex-col gap-1">
+        {keys.map((key) => {
+          const value = (ctx[key] ?? "").trim();
+          return (
+            <li key={key} className="text-2xs">
+              <span className="font-mono text-fg">{`{{${key}}}`}</span>
+              <span className="ml-2 text-muted">
+                {value ? (value.length > 120 ? `${value.slice(0, 120)}…` : value) : "(empty)"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function StepBody({ ticket }: { ticket: Ticket }) {
   const columns = useBoardStore((s) => s.config.columns);
   const col = columnById(ticket.columnId, columns);
   if (!col) return null;
   if (col.role === "collect-input" && col.id === "ideation") return <IdeationForm ticket={ticket} />;
   if (col.role === "collect-input" && col.id === "transcript") return <TranscriptForm ticket={ticket} />;
-  if (col.role === "collect-input") return <CaptureForm ticket={ticket} columnName={col.name} variable={outputVarName(col)} />;
+  if (isManualStep(col)) return <ManualCaptureForm ticket={ticket} col={col} />;
   if (col.role === "review" || col.role === "approve") return <ReviewForm ticket={ticket} />;
   if (col.id === "fry") return <GrillRoom ticket={ticket} />;
   if (col.id === "write-plan") return <PlanForm ticket={ticket} />;
-  if (col.id === "send-slack") return <SlackForm ticket={ticket} />;
   if (col.id === "file-jira") return <JiraForm ticket={ticket} />;
   if (col.role === "prompt" || col.role === "plan") return <RunForm ticket={ticket} />;
   if (col.id === "done") {
@@ -243,21 +276,29 @@ function DoneForm({ ticket }: { ticket: Ticket }) {
   );
 }
 
-function CaptureForm({ ticket, columnName, variable }: { ticket: Ticket; columnName: string; variable: string }) {
+function ManualCaptureForm({ ticket, col }: { ticket: Ticket; col: WorkflowColumn }) {
   const updateTicket = useBoardStore((s) => s.updateTicket);
   const runTicket = useBoardStore((s) => s.runTicket);
-  const [notes, setNotes] = useState(ticket.ideationNotes || ticket.description);
+  const variable = outputVarName(col);
+  const initial =
+    (variable && ticket.vars?.[variable]) ||
+    ticket.outputs[col.id] ||
+    "";
+  const [notes, setNotes] = useState(initial);
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        No agent on this step. Type the input; Save publishes it as{" "}
+        Manual step — no agent. Type the input; Save publishes it as{" "}
         <span className="font-mono text-fg">{`{{${variable || "prev"}}}`}</span> for later stages.
       </p>
+      {col.promptTemplate ? (
+        <p className="text-2xs text-subtle">{col.promptTemplate}</p>
+      ) : null}
       <Textarea
         className="min-h-40"
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder={`${columnName} notes…`}
+        placeholder={`${col.name}…`}
       />
       <Button
         variant="primary"
@@ -265,7 +306,12 @@ function CaptureForm({ ticket, columnName, variable }: { ticket: Ticket; columnN
         className="w-full"
         disabled={!notes.trim()}
         onClick={() => {
-          updateTicket(ticket.id, { ideationNotes: notes, description: ticket.description || notes });
+          const trimmed = notes.trim();
+          updateTicket(ticket.id, {
+            ideationNotes: trimmed,
+            outputs: { ...ticket.outputs, [col.id]: trimmed },
+            vars: { ...ticket.vars, ...(variable ? { [variable]: trimmed } : {}), input: trimmed },
+          });
           void runTicket(ticket.id);
         }}
       >
@@ -429,19 +475,24 @@ function ReviewForm({ ticket }: { ticket: Ticket }) {
 
 function RunForm({ ticket }: { ticket: Ticket }) {
   const runTicket = useBoardStore((s) => s.runTicket);
-  const harvestLiveSession = useBoardStore((s) => s.harvestLiveSession);
+  const finishLiveSession = useBoardStore((s) => s.finishLiveSession);
   const advance = useBoardStore((s) => s.advance);
   const config = useBoardStore((s) => s.config);
   const col = columnById(ticket.columnId, config.columns);
-  const resolved = resolveStagePrompt(col, config.prompts, config.docs);
+  const stage = getFlowStage(ticket.columnId);
   const busy = ticket.status === "executing";
   const hasOutput = Boolean(ticket.outputs[ticket.columnId]);
+  const payload = useStagePayload(ticket);
+  const promptPreview = stage?.prompt?.user?.slice(0, 280) || col?.promptTemplate || "";
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted">{resolved.body.slice(0, 280) || col?.promptTemplate}</p>
+      <p className="text-sm text-muted">{promptPreview}</p>
+      <ResolvedVars ticket={ticket} />
       {ticket.sessionDir ? (
         <>
-          <p className="text-2xs text-muted">Long stage in Terminal — answer prompts there. Close the window when done, or harvest the log now.</p>
+          <p className="text-2xs text-muted">
+            Post in Terminal, then close the window or click Done — Kindling will detect completion.
+          </p>
           <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-mono text-2xs">
             {ticket.liveLog || "Waiting for Terminal…"}
           </pre>
@@ -449,9 +500,9 @@ function RunForm({ ticket }: { ticket: Ticket }) {
             variant="secondary"
             size="md"
             className="w-full"
-            onClick={() => void harvestLiveSession(ticket.id, { ok: true, log: ticket.liveLog || "" })}
+            onClick={() => void finishLiveSession(ticket.id)}
           >
-            Harvest log & continue
+            Done — harvest &amp; continue
           </Button>
         </>
       ) : hasOutput ? (
@@ -459,7 +510,21 @@ function RunForm({ ticket }: { ticket: Ticket }) {
           {ticket.outputs[ticket.columnId]}
         </pre>
       ) : null}
-      <Button variant="primary" size="md" className="w-full" disabled={busy} onClick={() => void runTicket(ticket.id)}>
+      <PayloadEditor
+        payload={payload.payload}
+        onChange={payload.setPayload}
+        loading={payload.loading}
+        error={payload.error}
+        dirty={payload.dirty}
+        onRegenerate={() => void payload.regenerate()}
+      />
+      <Button
+        variant="primary"
+        size="md"
+        className="w-full"
+        disabled={busy || payload.loading || !payload.payload}
+        onClick={() => void runTicket(ticket.id, payload.payload ?? undefined)}
+      >
         {busy ? <RotateCw className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
         {busy ? "Running…" : `Run ${resolveStep(col, config.execution).label}`}
       </Button>
@@ -472,54 +537,29 @@ function RunForm({ ticket }: { ticket: Ticket }) {
   );
 }
 
-function SlackForm({ ticket }: { ticket: Ticket }) {
-  const runTicket = useBoardStore((s) => s.runTicket);
-  const busy = ticket.status === "executing";
-  const channel = channelLabel(ticket.slackChannel);
-  const agenda = ticket.outputs["prep-agenda"] || "";
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted">
-        Posts the approved agenda verbatim to {channel || "(no channel — will block)"}. Simulated Slack.
-      </p>
-      <div className="rounded-md border border-border bg-inset p-2 font-mono text-micro text-muted">
-        channel {channel || "—"}
-        {ticket.slackChannelId ? ` · ${ticket.slackChannelId}` : ""}
-      </div>
-      <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
-        {agenda || "No approved agenda on this ticket."}
-      </pre>
-      <Button
-        variant="primary"
-        size="md"
-        className="w-full"
-        disabled={busy}
-        onClick={async () => {
-          await runTicket(ticket.id);
-          toast.success(channel ? `Posted to ${channel}` : "Blocked — no channel");
-        }}
-      >
-        {busy ? <RotateCw className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
-        Send agenda
-      </Button>
-    </div>
-  );
-}
-
 function JiraForm({ ticket }: { ticket: Ticket }) {
   const runTicket = useBoardStore((s) => s.runTicket);
   const busy = ticket.status === "executing";
+  const payload = useStagePayload(ticket);
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">Creates issues from the approved plan only. Simulated Jira.</p>
       {ticket.plan ? <PlanPreview ticket={ticket} /> : <p className="text-sm text-danger">No approved plan.</p>}
+      <PayloadEditor
+        payload={payload.payload}
+        onChange={payload.setPayload}
+        loading={payload.loading}
+        error={payload.error}
+        dirty={payload.dirty}
+        onRegenerate={() => void payload.regenerate()}
+      />
       <Button
         variant="primary"
         size="md"
         className="w-full"
-        disabled={busy || !ticket.plan}
+        disabled={busy || !ticket.plan || payload.loading || !payload.payload}
         onClick={async () => {
-          await runTicket(ticket.id);
+          await runTicket(ticket.id, payload.payload ?? undefined);
           toast.success("Filed Jira issues");
         }}
       >
@@ -533,11 +573,26 @@ function JiraForm({ ticket }: { ticket: Ticket }) {
 function PlanForm({ ticket }: { ticket: Ticket }) {
   const runTicket = useBoardStore((s) => s.runTicket);
   const busy = ticket.status === "executing";
+  const payload = useStagePayload(ticket);
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">Epics and stories only. Grill Me answers from the spec are binding input.</p>
       {ticket.plan ? <PlanPreview ticket={ticket} /> : null}
-      <Button variant="primary" size="md" className="w-full" disabled={busy} onClick={() => void runTicket(ticket.id)}>
+      <PayloadEditor
+        payload={payload.payload}
+        onChange={payload.setPayload}
+        loading={payload.loading}
+        error={payload.error}
+        dirty={payload.dirty}
+        onRegenerate={() => void payload.regenerate()}
+      />
+      <Button
+        variant="primary"
+        size="md"
+        className="w-full"
+        disabled={busy || payload.loading || !payload.payload}
+        onClick={() => void runTicket(ticket.id, payload.payload ?? undefined)}
+      >
         {busy ? <RotateCw className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
         {busy ? "Writing plan…" : "Write plan"}
       </Button>

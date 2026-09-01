@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { COLUMNS, PREP_AGENDA_COLUMN_ID, SYNTHESIZE_COLUMN_ID, WRITE_PLAN_COLUMN_ID, startColumnId } from "./columns.ts";
 import { buildContext, harvestVars, interpolate, outputVarName } from "./flow-context.ts";
+import { clearTicketHistory } from "./sample-data.ts";
 import type { Ticket } from "./types.ts";
 
 function ticket(over: Partial<Ticket> = {}): Ticket {
@@ -30,6 +31,7 @@ function ticket(over: Partial<Ticket> = {}): Ticket {
     fryComplete: false,
     plan: null,
     jiraCreated: [],
+    linkedJiras: [],
     ...over,
   };
 }
@@ -79,4 +81,37 @@ test("tickets start on first agent stage if there is no collect-input", () => {
     { id: "agenda", name: "Agenda", label: "Agenda", role: "prompt" as const, rail: "run" as const, enabled: true },
   ];
   assert.equal(startColumnId(cols), "test");
+});
+
+test("clearTicketHistory removes run data and parks the ticket at the flow start", () => {
+  const cleared = clearTicketHistory(
+    ticket({
+      columnId: "fry",
+      status: "blocked",
+      spend: 2.5,
+      slackMembers: "@maya",
+      ideationNotes: "notes",
+      transcript: "notes",
+      slackPosted: { channel: "dx", channelId: "C1", ts: "1" },
+      outputs: { synthesize: "spec" },
+      vars: { spec: "spec" },
+      agentResponses: [{ id: "a1", at: new Date().toISOString(), columnId: "synthesize", summary: "done", body: "spec" }],
+      blockedReason: "failed",
+    }),
+    "ideation",
+    { slackChannel: "team-channel", slackChannelId: "C99" },
+  );
+  assert.equal(cleared.columnId, "ideation");
+  assert.equal(cleared.status, "idle");
+  assert.equal(cleared.spend, 0);
+  assert.equal(cleared.slackChannel, "team-channel");
+  assert.equal(cleared.slackChannelId, "C99");
+  assert.equal(cleared.slackMembers, "");
+  assert.equal(cleared.ideationNotes, "");
+  assert.equal(cleared.transcript, "");
+  assert.equal(cleared.slackPosted, undefined);
+  assert.deepEqual(cleared.outputs, {});
+  assert.deepEqual(cleared.vars, {});
+  assert.deepEqual(cleared.agentResponses, []);
+  assert.equal(cleared.blockedReason, undefined);
 });

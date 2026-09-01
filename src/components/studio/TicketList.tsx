@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
 import { columnById, DISCOVERY_FLOW_ID } from "@/lib/columns";
 import { formatSpend } from "@/lib/format";
-import { resolveStep } from "@/lib/agents";
+import { isManualStep, resolveStep } from "@/lib/agents";
 import { outputVarName } from "@/lib/flow-context";
 import { ExecutionTrail } from "./ExecutionTrail";
 import type { Ticket } from "@/lib/types";
@@ -30,7 +30,7 @@ export function TicketList() {
       col.role === "plan" ||
       col.role === "review" ||
       col.role === "approve" ||
-      col.role === "collect-input");
+      isManualStep(col));
   const busy = inFlow.some((t) => t.status === "executing");
   const step = col ? resolveStep(col, config.execution) : null;
 
@@ -42,7 +42,7 @@ export function TicketList() {
             {col
               ? `${String(config.columns.findIndex((c) => c.id === col.id) + 1).padStart(2, "0")} · ${col.role.replace("-", " ")}`
               : "Pick a stage"}
-            {step && col && (col.role === "prompt" || col.role === "plan") ? ` · ${step.label}` : ""}
+            {step && col && (col.role === "prompt" || col.role === "plan" || isManualStep(col)) ? ` · ${step.label}` : ""}
             {col?.outputKey ? ` · {{${col.outputKey}}}` : ""}
           </p>
           <h1 className="font-serif text-3xl font-medium tracking-tight md:text-4xl">{col?.label || col?.name || "Stage"}</h1>
@@ -53,7 +53,7 @@ export function TicketList() {
         {runnable ? (
           <Button variant="primary" size="md" disabled={busy} onClick={() => void runColumn(activeStageId)}>
             <Play className="size-4 fill-current" />
-            {busy ? "Running…" : inStage.length === 0 ? `Start · ${step?.label ?? "stage"}` : `Run ${step?.label ?? "stage"}`}
+            {busy ? "Running…" : inStage.length === 0 ? `Start · ${step?.label ?? "stage"}` : step?.manual ? "Save & continue" : `Run ${step?.label ?? "stage"}`}
           </Button>
         ) : null}
       </div>

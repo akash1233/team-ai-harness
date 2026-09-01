@@ -93,7 +93,7 @@ export function Studio() {
               ))}
             </select>
           </label>
-          <Button variant="ghost" size="md" onClick={() => reset()} title="Reset sample tickets">
+          <Button variant="ghost" size="md" onClick={() => reset()} title="Reset samples and clear all run history">
             <RotateCcw className="size-4" />
             <span className="hidden md:inline">Reset</span>
           </Button>

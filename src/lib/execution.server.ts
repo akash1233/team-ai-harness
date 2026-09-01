@@ -1,9 +1,10 @@
-import { createDefaultExecution } from "./team-config";
-import { legacyDefaultAgent, resolveStep } from "./agents";
-import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing";
+import { createDefaultExecution } from "./team-config.ts";
+import { legacyDefaultAgent, resolveStep } from "./agents.ts";
+import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing.ts";
 import {
   ensurePrintMode,
   explainCliFailure,
+  formatKindlingTerminalTitle,
   isNoiseLog,
   readSession,
   resolveCursorModel,
@@ -15,11 +16,14 @@ import {
   startMacSession,
   tryCursorChatId,
   toInteractiveArgs,
+  evaluateLongSessionPoll,
+  ensureNotifyMcpSeenAt,
+  notifyPostSucceeded,
   withCursorWorkspace,
   withNonInteractiveFlags,
   withoutFullAgentMode,
-} from "./cli-session";
-import type { AgentKind, ExecutionConfig, StepAgent, TokenUsage } from "./types";
+} from "./cli-session.ts";
+import type { AgentKind, ExecutionConfig, StepAgent, TokenUsage } from "./types.ts";
 
 export type ModelCall = {
   text: string;
@@ -65,6 +69,7 @@ export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
     cisModel: envStr("PIT_CIS_MODEL") || base.cisModel,
     cisTaskType: envStr("PIT_CIS_TASK_TYPE") || base.cisTaskType,
     timeoutMs: Number(envStr("PIT_TIMEOUT_MS") || base.timeoutMs) || 120000,
+    stageTimeoutMs: Number(envStr("PIT_STAGE_TIMEOUT_MS") || base.stageTimeoutMs) || 300000,
     demoFallbacks: envStr("PIT_DEMO_FALLBACKS") === "0" ? false : envStr("PIT_DEMO_FALLBACKS") === "1" ? true : base.demoFallbacks,
     pricing: mergePricing({
       ...seeded,
@@ -232,6 +237,7 @@ async function invokeCli(
   extraArgs: string[] = [],
   timeoutMs?: number,
   printMode = false,
+  terminalTitle?: string,
 ): Promise<{ ok: boolean; text: string; error?: string; via: string; sessionDir?: string; pending?: boolean }> {
   const line = kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
   const { bin, args } = parseCommand(line);
@@ -259,7 +265,13 @@ async function invokeCli(
       const chat = await tryCursorChatId(found, cwd);
       if (chat) flags = ["--resume", chat, ...flags];
     }
-    const session = await startInteractiveSession(cwd, found, flags, prompt);
+    const session = await startInteractiveSession(
+      cwd,
+      found,
+      flags,
+      prompt,
+      terminalTitle ? { title: terminalTitle } : undefined,
+    );
     return {
       ok: true,
       text: "Long stage opened in Terminal. Answer any prompts there. Close the window when the agent is done — Kindling is tailing the log.",
@@ -277,25 +289,35 @@ async function invokeCli(
     args: flags,
     prompt,
     cwd,
-    timeoutMs: timeoutMs ?? exec.timeoutMs,
+    timeoutMs: timeoutMs ?? exec.stageTimeoutMs ?? exec.timeoutMs,
     inTerminal: Boolean(exec.runInTerminal),
     fullAgent: Boolean(exec.fullAgentMode),
+    terminalTitle,
   });
   const body = stageOutputFromLog(raw.out || raw.err);
   const live = raw.via === "terminal" && body.length > 0;
   if ((raw.code === 0 && body) || live) {
     return { ok: true, text: body, via: raw.via === "terminal" ? `${via} Terminal` : via };
   }
+  const timedOut = /timed out after/i.test(raw.err);
+  const limit = timeoutMs ?? exec.stageTimeoutMs ?? exec.timeoutMs;
   return {
     ok: false,
     text: body,
     via: raw.via === "terminal" ? `${via} Terminal` : via,
-    error: explainCliFailure(body || `exit ${raw.code}`),
+    error: timedOut
+      ? `Timed out after ${Math.round(limit / 60000)}m waiting for the agent. Rerun the stage, or raise the limit in Settings → Execution (Stage timeout).`
+      : explainCliFailure(body || `exit ${raw.code}`),
   };
 }
 
-async function callLocalCli(exec: ExecutionConfig, prompt: string, kind: "cursor" | "claude"): Promise<ModelCall> {
-  const result = await invokeCli(exec, kind, prompt, [], undefined, !exec.fullAgentMode);
+async function callLocalCli(
+  exec: ExecutionConfig,
+  prompt: string,
+  kind: "cursor" | "claude",
+  terminalTitle?: string,
+): Promise<ModelCall> {
+  const result = await invokeCli(exec, kind, prompt, [], undefined, !exec.fullAgentMode, terminalTitle);
   if (result.pending && result.sessionDir) {
     return { ok: true, text: result.text, via: result.via, sessionDir: result.sessionDir, pending: true };
   }
@@ -523,6 +545,7 @@ export async function runModel(opts: {
   execution?: ExecutionConfig;
   promptId?: string;
   stepAgent?: StepAgent;
+  terminalTitle?: string;
 }): Promise<ModelCall> {
   const exec = resolveExecution(opts.execution);
   const step = resolveStep({ agent: opts.stepAgent ?? "inherit" }, exec);
@@ -550,7 +573,7 @@ export async function runModel(opts: {
   if (exec.localHttpUrl.trim()) {
     return cost(await callLocalHttp(exec.localHttpUrl, kind, exec, opts.system, opts.user, opts.maxTokens));
   }
-  return cost(await callLocalCli(exec, prompt, kind));
+  return cost(await callLocalCli(exec, prompt, kind, opts.terminalTitle));
 }
 
 type LocatedCli = {
@@ -626,6 +649,7 @@ async function pingAgent(
     extra,
     Math.min(Math.max(exec.timeoutMs, 20000), 120000),
     true,
+    formatKindlingTerminalTitle(`${via} test`),
   );
   const body = (result.text || result.error || "").slice(0, 800);
   return {
@@ -995,7 +1019,15 @@ export async function startAgentTest(opts: {
       log,
     };
   }
-  const session = await startMacSession(workspaceOf(exec), located.found.path, args, promptText);
+  const session = await startMacSession(
+    workspaceOf(exec),
+    located.found.path,
+    args,
+    promptText,
+    {
+      title: formatKindlingTerminalTitle(opts.mcp ? `${step.label} MCP test` : `${step.label} test`),
+    },
+  );
   return {
     ok: probe.ok,
     via: step.label,
@@ -1008,7 +1040,7 @@ export async function startAgentTest(opts: {
 
 export async function pollAgentTest(
   sessionDir: string,
-  opts?: { longSession?: boolean },
+  opts?: { longSession?: boolean; columnId?: string; hasSlackMessage?: boolean },
 ): Promise<{
   done: boolean;
   ok: boolean;
@@ -1030,6 +1062,18 @@ export async function pollAgentTest(
     };
   }
   if (opts?.longSession) {
+    let notifyMcpSeenAt: number | undefined;
+    if (opts.columnId === "send-slack" && notifyPostSucceeded(snap.log)) {
+      notifyMcpSeenAt = await ensureNotifyMcpSeenAt(sessionDir);
+    }
+    const verdict = evaluateLongSessionPoll(snap, {
+      columnId: opts.columnId,
+      hasSlackMessage: opts.hasSlackMessage,
+      notifyMcpSeenAt,
+    });
+    if (verdict.done) {
+      return { done: true, ok: verdict.ok, log: snap.log, error: verdict.error };
+    }
     return { done: false, ok: true, log: snap.log };
   }
   if (age > 12000 && isNoiseLog(snap.log)) {

@@ -1,0 +1,101 @@
+import discoveryFlowJson from "../../flows/discovery.flow.json" with { type: "json" };
+import { DISCOVERY_FLOW_ID } from "./columns.ts";
+import { buildContext, interpolate, mentionedKeys } from "./flow-context.ts";
+import type { TeamDoc, Ticket } from "./types.ts";
+
+export type FlowStagePrompt = {
+  system?: string;
+  user?: string;
+};
+
+export type FlowStageSpec = {
+  id: string;
+  label: string;
+  role: string;
+  agent?: string;
+  writes?: string[];
+  maxTokens?: number;
+  prompt?: FlowStagePrompt;
+};
+
+export type FlowSpec = {
+  id: string;
+  name: string;
+  description?: string;
+  variables: Record<string, string>;
+  stages: FlowStageSpec[];
+};
+
+const DISCOVERY_FLOW_PATH = "flows/discovery.flow.json";
+
+export function loadDiscoveryFlowSpec(): FlowSpec {
+  return discoveryFlowJson as FlowSpec;
+}
+
+/** Reset cached spec (tests) — no-op with static JSON import. */
+export function clearFlowSpecCache(): void {}
+
+export function getFlowStage(stageId: string, flow: FlowSpec = loadDiscoveryFlowSpec()): FlowStageSpec | undefined {
+  return flow.stages.find((s) => s.id === stageId);
+}
+
+export function listFlowVariables(flow: FlowSpec = loadDiscoveryFlowSpec()): Record<string, string> {
+  return { ...flow.variables };
+}
+
+export function flowStageMentionedKeys(stage: FlowStageSpec | undefined): string[] {
+  if (!stage?.prompt) return [];
+  const keys = [...mentionedKeys(stage.prompt.system), ...mentionedKeys(stage.prompt.user)];
+  return [...new Set(keys)];
+}
+
+export function validateStagePrompt(stage: FlowStageSpec, flow: FlowSpec = loadDiscoveryFlowSpec()): string[] {
+  const catalog = new Set(Object.keys(flow.variables));
+  catalog.add("grillPhase");
+  return flowStageMentionedKeys(stage).filter((key) => !catalog.has(key) && !key.startsWith("jira."));
+}
+
+function grillPhase(ticket: Ticket, grillSubmit?: boolean): string {
+  return grillSubmit || ticket.grillRounds.some((r) => r.submitted)
+    ? "The team answered the last round. Either ask the next frontier against the spec, or if the tree is settled, set frontierEmpty true and write conclusions planning must honor."
+    : "Start round 1. Grill the Synthesize spec. Ask the whole frontier. One recommended answer per question.";
+}
+
+const DEFAULT_MAX_TOKENS = 4000;
+
+/**
+ * Resolves system + user prompt for a stage from discovery.flow.json.
+ * Returns undefined when the stage has no prompt (manual, review, terminal).
+ */
+export function resolveFlowStagePrompt(
+  stageId: string,
+  ticket: Ticket,
+  docs?: TeamDoc[],
+  opts?: { grillSubmit?: boolean },
+): { system: string; user: string; max: number } | undefined {
+  const stage = getFlowStage(stageId);
+  if (!stage?.prompt) return undefined;
+
+  const ctx = buildContext(ticket, docs);
+  if (stageId === "fry") {
+    ctx.grillPhase = grillPhase(ticket, opts?.grillSubmit);
+  }
+
+  const system = interpolate(stage.prompt.system ?? "", ctx).trim();
+  const user = interpolate(stage.prompt.user ?? "", ctx).trim();
+  const max = stage.maxTokens ?? DEFAULT_MAX_TOKENS;
+
+  return {
+    system: system || "Produce a concise operator-facing result.",
+    user,
+    max,
+  };
+}
+
+export function discoveryFlowPath(): string {
+  return DISCOVERY_FLOW_PATH;
+}
+
+export function isDiscoveryFlow(flowId?: string): boolean {
+  return !flowId || flowId === DISCOVERY_FLOW_ID;
+}

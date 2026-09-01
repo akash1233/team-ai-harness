@@ -18,6 +18,18 @@ export const BLOCKED_COLUMN_ID = "blocked";
 export const PLAN_JSON_START = "<<<PLAN_JSON";
 export const PLAN_JSON_END = "PLAN_JSON>>>";
 
+export const NOTIFY_PROMPT_TEMPLATE = `Post the approved agenda to Slack using the slack-mcp slack_write tool.
+
+Call slack_write with method chat.postMessage and params channel + text (see below).
+Approve the slack_write tool call when Cursor prompts — the post will not run until you approve.
+
+Channel ID: {{slackChannelId}}
+Channel: #{{slackChannel}}
+
+Post this message verbatim — do not rewrite:
+
+{{slackMessage}}`;
+
 export const COLUMNS: WorkflowColumn[] = [
   {
     id: IDEATION_COLUMN_ID,
@@ -26,6 +38,7 @@ export const COLUMNS: WorkflowColumn[] = [
     role: "collect-input",
     rail: "run",
     enabled: true,
+    agent: "manual",
     promptTemplate:
       "Who to notify for the meeting agenda. Slack channel (single #) and/or team members.",
   },
@@ -62,8 +75,8 @@ Do not send Slack. Do not create Jira issues. Agenda document only.`,
     role: "prompt",
     rail: "run",
     enabled: true,
-    promptTemplate:
-      "Post the approved meeting agenda to Slack. One action. Do not rewrite the message.",
+    agent: "cursor",
+    promptTemplate: NOTIFY_PROMPT_TEMPLATE,
   },
   {
     id: TRANSCRIPT_COLUMN_ID,
@@ -72,6 +85,7 @@ Do not send Slack. Do not create Jira issues. Agenda document only.`,
     role: "collect-input",
     rail: "idle",
     enabled: true,
+    agent: "manual",
     promptTemplate: "Paste the meeting transcript or notes.",
   },
   {

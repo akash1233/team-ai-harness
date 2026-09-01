@@ -39,7 +39,7 @@ export type ExecutionProvider = "local" | "studio" | "cis";
 export type LocalAgent = "cursor" | "claude";
 export type AgentKind = "cursor" | "claude" | "studio" | "cis";
 export type AgentTarget = "local" | "remote";
-export type StepAgent = "inherit" | AgentKind;
+export type StepAgent = "inherit" | "manual" | AgentKind;
 
 export type ExecutionConfig = {
   defaultAgent: AgentKind;
@@ -57,6 +57,8 @@ export type ExecutionConfig = {
   cisModel: string;
   cisTaskType: string;
   timeoutMs: number;
+  /** Non-interactive stage runs (print mode / one-shot CLI). Default 5 min. */
+  stageTimeoutMs?: number;
   demoFallbacks: boolean;
   pricing: PricingConfig;
   /** Cheapest model used by Test run (Claude `--model`). */
@@ -90,6 +92,8 @@ export type PipelineRun = {
   ticketKey: string;
   columnId: string;
   variable?: string;
+  /** Prompt actually sent to the agent, so history shows what was passed in. */
+  input?: string;
   output: string;
   via?: string;
   ok: boolean;
@@ -102,6 +106,8 @@ export type AgentResponse = {
   at: string;
   columnId: string;
   summary: string;
+  /** Prompt actually sent to the agent, so history shows what was passed in. */
+  input?: string;
   body: string;
   via?: string;
   ok?: boolean;
@@ -193,6 +199,8 @@ export type TeamPrompt = {
   studioPromptId?: string;
   /** Skills from the library pasted into this prompt on run. */
   skillIds: string[];
+  /** Jira issues from the team catalog included when this prompt runs. */
+  jiraKeys: string[];
 };
 
 export type TeamDoc = {
@@ -262,6 +270,7 @@ export type Ticket = {
   /** Live Terminal session for a long pipeline stage. */
   sessionDir?: string;
   liveLog?: string;
-  linkedJira?: LinkedJira;
+  liveInput?: string;
+  linkedJiras: LinkedJira[];
   linkedRepo?: LinkedRepo;
 };

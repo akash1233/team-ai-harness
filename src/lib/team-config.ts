@@ -7,19 +7,21 @@ import {
   FILE_JIRA_COLUMN_ID,
   FRY_COLUMN_ID,
   IDEATION_COLUMN_ID,
+  NOTIFY_PROMPT_TEMPLATE,
   PREVIEW_FRY_COLUMN_ID,
   QUICK_SPEC_FLOW_ID,
+  SEND_SLACK_COLUMN_ID,
   SYNTHESIZE_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
-} from "./columns";
-import { mergePricing } from "./pricing";
-import { createDefaultPrompts, mergePrompts, stampPromptRefs } from "./prompts";
-import { createDefaultConnectors, mergeConnectors } from "./connectors";
-import { legacyDefaultAgent } from "./agents";
-import { DEFAULT_DOCS } from "./grill-skill";
-import type { ExecutionConfig, Flow, TeamConfig, TeamDoc, TeamMember, WorkflowColumn } from "./types";
+} from "./columns.ts";
+import { mergePricing } from "./pricing.ts";
+import { createDefaultPrompts, flowStagePromptBody, mergePrompts, stampPromptRefs } from "./prompts.ts";
+import { createDefaultConnectors, mergeConnectors } from "./connectors.ts";
+import { legacyDefaultAgent } from "./agents.ts";
+import { DEFAULT_DOCS } from "./grill-skill.ts";
+import type { ExecutionConfig, Flow, TeamConfig, TeamDoc, TeamMember, WorkflowColumn } from "./types.ts";
 
-export { executionLabel } from "./agents";
+export { executionLabel } from "./agents.ts";
 export { DISCOVERY_FLOW_ID, QUICK_SPEC_FLOW_ID };
 
 export const DEFAULT_MEMBERS: TeamMember[] = [
@@ -39,7 +41,7 @@ export function createDiscoveryFlow(): Flow {
     description: "Brief → agenda (Cursor) → notes → spec (Studio) → Grill Me → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns()),
     autoAdvance: true,
-    autoRun: true,
+    autoRun: false,
     continueInFlowId: QUICK_SPEC_FLOW_ID,
   };
 }
@@ -61,7 +63,7 @@ export function createQuickSpecFlow(): Flow {
       BLOCKED_COLUMN_ID,
     ])),
     autoAdvance: true,
-    autoRun: true,
+    autoRun: false,
   };
 }
 
@@ -86,6 +88,7 @@ export function createDefaultExecution(): ExecutionConfig {
     cisModel: "anthropic.claude-haiku-4-5-20251001-v1:0",
     cisTaskType: "aws-converse-v1",
     timeoutMs: 120000,
+    stageTimeoutMs: 300000,
     demoFallbacks: true,
     pricing: mergePricing(),
     claudeTestModel: "haiku",
@@ -131,13 +134,20 @@ export function mergeColumns(saved?: WorkflowColumn[]): WorkflowColumn[] {
   if (!saved?.length) return defaults;
   return saved.map((col) => {
     const base = defaults.find((d) => d.id === col.id);
-    return {
+    const merged: WorkflowColumn = {
       ...base,
       ...col,
-      agent: col.agent ?? base?.agent ?? "inherit",
+      agent: col.agent ?? base?.agent ?? (col.role === "collect-input" ? "manual" : "inherit"),
       outputKey: col.outputKey ?? base?.outputKey,
       promptRef: col.promptRef ?? base?.promptRef,
     };
+    if (col.id === SEND_SLACK_COLUMN_ID) {
+      merged.agent = "cursor";
+      merged.promptTemplate = NOTIFY_PROMPT_TEMPLATE;
+    }
+    const flowBody = flowStagePromptBody(col.id);
+    if (flowBody !== undefined) merged.promptTemplate = flowBody;
+    return merged;
   });
 }
 
@@ -234,17 +244,18 @@ export function mergeTeamConfig(saved?: Partial<TeamConfig>): TeamConfig {
   const flows = mergeFlows(saved.flows, saved.columns);
   const activeFlowId =
     saved.activeFlowId && flows.some((f) => f.id === saved.activeFlowId) ? saved.activeFlowId : flows[0]!.id;
+  const activeColumns = flows.find((f) => f.id === activeFlowId)?.columns ?? d.columns;
   return applyActiveFlow({
     ...d,
     ...saved,
     members: saved.members?.length ? saved.members : d.members,
     docs: mergeDocs(saved.docs),
-    prompts: mergePrompts(saved.prompts, saved.columns ?? d.columns),
+    prompts: mergePrompts(saved.prompts, activeColumns),
     execution: mergeExecution(saved.execution),
     connectors: mergeConnectors(saved.connectors),
     flows,
     activeFlowId,
-    columns: flows.find((f) => f.id === activeFlowId)?.columns ?? d.columns,
+    columns: activeColumns,
     pipelineLayout: saved.pipelineLayout === "horizontal" || saved.pipelineLayout === "vertical" ? saved.pipelineLayout : d.pipelineLayout,
   });
 }

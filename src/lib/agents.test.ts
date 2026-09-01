@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveStep, stepLabel, legacyDefaultAgent } from "./agents.ts";
+import { resolveStep, stepLabel, legacyDefaultAgent, stepBadge } from "./agents.ts";
 import { DEFAULT_PRICING } from "./pricing.ts";
 import type { ExecutionConfig } from "./types.ts";
 
@@ -54,6 +54,23 @@ test("legacy provider studio maps to defaultAgent studio", () => {
   assert.equal(legacyDefaultAgent({ localAgent: "claude" }), "claude");
 });
 
+test("manual step resolves without an agent", () => {
+  const step = resolveStep({ agent: "manual", role: "prompt" }, exec);
+  assert.equal(step.manual, true);
+  assert.equal(step.label, "Manual");
+});
+
+test("collect-input stages are manual even when agent is inherit", () => {
+  const step = resolveStep({ agent: "inherit", role: "collect-input" }, exec);
+  assert.equal(step.manual, true);
+  assert.equal(step.label, "Manual");
+});
+
 test("step labels stay short for the run button", () => {
   assert.equal(stepLabel("cis", "remote"), "CIS");
+});
+
+test("stepBadge shows Manual for manual stages", () => {
+  assert.equal(stepBadge({ agent: "manual", role: "prompt" }, exec), "Manual");
+  assert.equal(stepBadge({ agent: "cursor", role: "prompt" }, exec), "Cursor");
 });

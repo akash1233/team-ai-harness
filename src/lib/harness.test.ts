@@ -75,6 +75,7 @@ function ticket(over: Partial<Ticket> = {}): Ticket {
     plan: null,
     jiraCreated: [],
     createdAt: "2026-08-28T00:00:00.000Z",
+    linkedJiras: [],
     ...over,
   };
 }
@@ -156,7 +157,7 @@ test("library prompt + skill is what the stage actually runs", () => {
   const stage = col({ id: "grill", role: "prompt", promptRef: "p1" });
   const resolved = resolveStagePrompt(
     stage,
-    [{ id: "p1", name: "Grill", body: "Grill the spec.", skillIds: ["doc-grill-me"] }],
+    [{ id: "p1", name: "Grill", body: "Grill the spec.", skillIds: ["doc-grill-me"], jiraKeys: [] }],
     [{ id: "doc-grill-me", title: "grill-me", kind: "skill", body: "Interview relentlessly." }],
   );
   assert.match(resolved.body, /Grill the spec/);

@@ -104,3 +104,22 @@ export function connectorVars(issue?: LinkedJira | null, repo?: LinkedRepo | nul
   }
   return vars;
 }
+
+export function hydrateLinkedJiras(linkedJiras?: LinkedJira[], linkedJira?: LinkedJira): LinkedJira[] {
+  return Array.isArray(linkedJiras) ? linkedJiras : linkedJira ? [linkedJira] : [];
+}
+
+/** Compact one-line-per-issue references for messages posted outside the app. */
+export function formatJiraRefs(issues: LinkedJira[]): string {
+  return issues.map((issue) => [issue.key, issue.title, issue.url && `— ${issue.url}`].filter(Boolean).join(" ")).join("\n");
+}
+
+export function mergeJiraIssues(...groups: LinkedJira[][]): LinkedJira[] {
+  const seen = new Set<string>();
+  return groups.flat().filter((issue) => {
+    const key = issue.key.toUpperCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

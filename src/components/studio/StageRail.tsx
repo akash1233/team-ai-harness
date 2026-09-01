@@ -1,7 +1,7 @@
 import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
 import { DISCOVERY_FLOW_ID, BLOCKED_COLUMN_ID } from "@/lib/columns";
-import { resolveStep, shortAgent } from "@/lib/agents";
+import { stepBadge } from "@/lib/agents";
 
 export function StageRail() {
   const columns = useBoardStore((s) => s.config.columns);
@@ -27,8 +27,7 @@ export function StageRail() {
             : here.some((t) => t.status === "blocked") ||
               inFlow.some((t) => t.agentResponses.some((r) => r.columnId === col.id && r.ok === false));
         const active = col.id === activeStageId;
-        const agent =
-          col.agent && col.agent !== "inherit" ? shortAgent(resolveStep(col, execution).kind) : null;
+        const badge = stepBadge(col, execution);
         return (
           <button
             key={col.id}
@@ -59,9 +58,9 @@ export function StageRail() {
               {String(i + 1).padStart(2, "0")}
             </span>
             <span className="min-w-0 flex-1 truncate text-sm font-medium">{col.label}</span>
-            {agent ? (
+            {badge ? (
               <span className={cn("hidden font-mono text-micro md:inline", active ? (failed ? "text-danger-fg/80" : "text-accent-fg/80") : "text-subtle")}>
-                {agent}
+                {badge}
               </span>
             ) : null}
             <span

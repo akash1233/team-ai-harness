@@ -480,6 +480,7 @@ function RunForm({ ticket }: { ticket: Ticket }) {
   const stage = getFlowStage(ticket.columnId);
   const busy = ticket.status === "executing";
   const hasOutput = Boolean(ticket.outputs[ticket.columnId]);
+  const streaming = busy && !ticket.sessionDir && Boolean(ticket.liveLog);
   const payload = useStagePayload(ticket);
   const promptPreview = stage?.prompt?.user?.slice(0, 280) || col?.promptTemplate || "";
   return (
@@ -503,6 +504,10 @@ function RunForm({ ticket }: { ticket: Ticket }) {
             Done — harvest &amp; continue
           </Button>
         </>
+      ) : streaming ? (
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
+          {ticket.liveLog}
+        </pre>
       ) : hasOutput ? (
         <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
           {ticket.outputs[ticket.columnId]}

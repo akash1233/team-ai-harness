@@ -3,7 +3,7 @@ import { useBoardStore } from "@/lib/board-store";
 import { formatSpend, channelLabel } from "@/lib/format";
 import { columnById } from "@/lib/columns";
 import { outputVarName } from "@/lib/flow-context";
-import { previewLine, stagePurpose } from "@/lib/stage-purpose";
+import { stagePurpose } from "@/lib/stage-purpose";
 import type { Ticket } from "@/lib/types";
 
 export function TicketNote({ ticket, selected, onSelect }: { ticket: Ticket; selected: boolean; onSelect: () => void }) {
@@ -12,7 +12,10 @@ export function TicketNote({ ticket, selected, onSelect }: { ticket: Ticket; sel
   const col = columnById(ticket.columnId, config.columns);
   const last = ticket.agentResponses.find((r) => r.columnId === ticket.columnId) ?? ticket.agentResponses[0];
   const failed = ticket.status === "blocked";
-  const output = ticket.outputs[ticket.columnId] || last?.body || "";
+  const output =
+    ticket.status === "executing"
+      ? ticket.liveLog || ticket.outputs[ticket.columnId] || last?.body || ""
+      : ticket.outputs[ticket.columnId] || last?.body || "";
   const error = ticket.blockedReason || (last?.ok === false ? last.error || last.body : "");
   const writes = outputVarName(col);
 
@@ -54,9 +57,13 @@ export function TicketNote({ ticket, selected, onSelect }: { ticket: Ticket; sel
       {col ? <p className="mt-1 text-2xs text-muted">{stagePurpose(col)}</p> : null}
 
       {failed && error ? (
-        <p className="mt-3 text-micro text-danger">{previewLine(error, 120)}</p>
+        <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm border border-danger/40 bg-danger/5 p-2 font-mono text-micro text-danger">
+          {error}
+        </pre>
       ) : output ? (
-        <p className="mt-3 text-2xs leading-snug text-muted">{previewLine(output)}</p>
+        <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm border border-border bg-inset p-2 font-mono text-micro text-muted">
+          {output}
+        </pre>
       ) : (
         <p className="mt-3 text-micro text-subtle">No output yet</p>
       )}

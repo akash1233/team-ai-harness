@@ -167,6 +167,29 @@ test("WebLLM harvest reuses stripThinkBlocks so think never becomes the spec", (
   );
 });
 
+test("takeWebllmStreamLog throttles Node INFO and skips think until flushed", async () => {
+  const { takeWebllmStreamLog, WEBLLM_STREAM_MIN_CHARS, WEBLLM_STREAM_MIN_MS } = await import("./webllm-engine.ts");
+  const burst = "x".repeat(WEBLLM_STREAM_MIN_CHARS);
+  const ready = { lastVisible: "", lastAt: 0, thought: false };
+  assert.deepEqual(takeWebllmStreamLog(ready, burst, 1), { chars: burst.length, delta: burst });
+
+  const state = { lastVisible: "", lastAt: 0, thought: false };
+  assert.deepEqual(takeWebllmStreamLog(state, "<think>plan", 1), { chars: 0, thinking: true });
+  assert.equal(takeWebllmStreamLog(state, "<think>plan more", 2), null);
+  assert.equal(takeWebllmStreamLog(state, "Hi", 3), null);
+  const first = takeWebllmStreamLog(state, "Hi there, this is enough visible text to flush.", 3, true);
+  assert.equal(first?.chars, "Hi there, this is enough visible text to flush.".length);
+  assert.equal(first?.delta, "Hi there, this is enough visible text to flush.");
+  assert.equal(takeWebllmStreamLog(state, "Hi there, this is enough visible text to flush. More.", 4), null);
+  const later = takeWebllmStreamLog(
+    state,
+    "Hi there, this is enough visible text to flush. More.",
+    4 + WEBLLM_STREAM_MIN_MS,
+    true,
+  );
+  assert.equal(later?.delta, " More.");
+});
+
 test("withoutRuntimeCallbacks drops functions so Seroval can serialize the server payload", () => {
   const onProgress = () => {};
   const onLog = () => {};

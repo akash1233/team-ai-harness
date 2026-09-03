@@ -213,6 +213,41 @@ export async function ensureWebllmEngine(
   }
 }
 
+export type WebllmStreamLogState = {
+  lastVisible: string;
+  lastAt: number;
+  thought: boolean;
+};
+
+/** Throttle Node INFO so token-by-token generate does not flood stdout. */
+export const WEBLLM_STREAM_MIN_MS = 250;
+export const WEBLLM_STREAM_MIN_CHARS = 80;
+
+export function takeWebllmStreamLog(
+  state: WebllmStreamLogState,
+  partial: string,
+  now: number,
+  force = false,
+): { chars: number; delta?: string; thinking?: boolean } | null {
+  const visible = stripThinkBlocks(partial);
+  if (!visible) {
+    if (/<think/i.test(partial) && !state.thought) {
+      state.thought = true;
+      state.lastAt = now;
+      return { chars: 0, thinking: true };
+    }
+    return null;
+  }
+  const delta = visible.slice(state.lastVisible.length);
+  if (!delta) return null;
+  if (!force && delta.length < WEBLLM_STREAM_MIN_CHARS && now - state.lastAt < WEBLLM_STREAM_MIN_MS) {
+    return null;
+  }
+  state.lastVisible = visible;
+  state.lastAt = now;
+  return { chars: visible.length, delta };
+}
+
 async function readCompletion(
   result: CompletionChunk | AsyncIterable<CompletionChunk>,
   onDelta?: (text: string) => void,
@@ -307,6 +342,16 @@ export async function runWebllmCompletion(opts: {
     span.log.info("generate.start", { modelId: model.modelId, maxTokens: opts.maxTokens });
     updateWebllmJob(jobId, { phase: "generate", text: `Generating with ${model.modelId}…` });
     opts.onProgress?.({ phase: "generate", modelId: model.modelId, text: `Generating with ${model.modelId}…` });
+    const streamState: WebllmStreamLogState = { lastVisible: "", lastAt: 0, thought: false };
+    const emitStream = (partial: string, force = false) => {
+      const event = takeWebllmStreamLog(streamState, partial, Date.now(), force);
+      if (!event) return;
+      if (event.thinking) {
+        span.log.info("stream", { thinking: true });
+        return;
+      }
+      span.log.info("stream", { chars: event.chars, delta: event.delta });
+    };
     const genMs = Math.max(opts.execution?.stageTimeoutMs ?? opts.execution?.timeoutMs ?? 300000, 60_000);
     const result = await withTimeout(
       engine.chat.completions.create({
@@ -331,10 +376,12 @@ export async function runWebllmCompletion(opts: {
           phase: "generate",
           text: visible || (/<think/i.test(partial) ? "Thinking…" : partial),
         });
+        emitStream(partial);
       }),
       genMs,
       `WebLLM stream ${model.modelId}`,
     );
+    emitStream(text, true);
     const body = stripThinkBlocks(text);
     if (!body) {
       span.fail(`${via} returned an empty body`);

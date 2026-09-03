@@ -148,11 +148,6 @@
       "id": "done",
       "label": "Done",
       "role": "terminal"
-    },
-    {
-      "id": "blocked",
-      "label": "Blocked",
-      "role": "terminal"
     }
   ]
 }

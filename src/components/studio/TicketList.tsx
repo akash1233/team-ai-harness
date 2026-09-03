@@ -6,7 +6,7 @@ import { columnById, DISCOVERY_FLOW_ID } from "@/lib/columns";
 import { formatSpend } from "@/lib/format";
 import { isManualStep, resolveStep } from "@/lib/agents";
 import { outputVarName } from "@/lib/flow-context";
-import { previewLine, stagePurpose } from "@/lib/stage-purpose";
+import { stagePurpose } from "@/lib/stage-purpose";
 import { ExecutionTrail } from "./ExecutionTrail";
 import type { Ticket } from "@/lib/types";
 
@@ -109,7 +109,7 @@ function TicketCard({
   const writes = outputVarName(stageCol);
   const output =
     ticket.status === "executing"
-      ? ""
+      ? ticket.liveLog || ""
       : (writes && ticket.vars?.[writes]) ||
         ticket.outputs[stageId] ||
         last?.body ||
@@ -150,9 +150,13 @@ function TicketCard({
       </h2>
       {stageCol ? <p className="mt-1 text-sm text-muted">{stagePurpose(stageCol)}</p> : null}
       {failed && error ? (
-        <p className="mt-3 text-2xs text-danger">{previewLine(error, 120)}</p>
+        <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-danger/40 bg-danger/5 p-2 font-mono text-2xs text-danger">
+          {error}
+        </pre>
       ) : output ? (
-        <p className="mt-3 text-sm leading-snug text-muted">{previewLine(output)}</p>
+        <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 text-sm text-fg">
+          {output}
+        </pre>
       ) : (
         <p className="mt-3 text-2xs text-subtle">No output yet</p>
       )}

@@ -87,7 +87,7 @@ export async function runWebllmStage(
         return;
       }
       if (p.phase === "generate") {
-        onProgress?.(p.text === "Thinking…" ? "Thinking…" : "Writing…");
+        onProgress?.(p.text === "Thinking…" ? "Thinking…" : p.text || "Writing…");
         return;
       }
       onProgress?.(p.text);

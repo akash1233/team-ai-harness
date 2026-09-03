@@ -28,6 +28,17 @@ export function isManualStep(column?: StepColumnRef | null): boolean {
   return column.role === "collect-input";
 }
 
+/** Review / sign-off gate — edit previous output, then Approve. Never an agent run. */
+export function isReviewGate(column?: StepColumnRef | null): boolean {
+  return column?.role === "review" || column?.role === "approve";
+}
+
+/** Stages whose board action is Run / Save, not Approve. */
+export function isRunnableStage(column?: StepColumnRef | null): boolean {
+  if (!column || isReviewGate(column)) return false;
+  return column.role === "prompt" || column.role === "plan" || isManualStep(column);
+}
+
 export function legacyDefaultAgent(exec?: Partial<ExecutionConfig> | null): AgentKind | undefined {
   if (!exec) return undefined;
   if (exec.defaultAgent) return exec.defaultAgent;

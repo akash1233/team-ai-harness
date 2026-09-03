@@ -7,6 +7,7 @@ import {
   FILE_JIRA_COLUMN_ID,
   nextColumnId,
   parkOrphanTickets,
+  previousColumn,
   resolveActiveStage,
   startColumnId,
 } from "./columns.ts";
@@ -117,6 +118,12 @@ test("one-stage pipeline does not advance to a phantom Done column", () => {
 
 test("Discovery still advances File Jira to Done", () => {
   assert.equal(nextColumnId(FILE_JIRA_COLUMN_ID, COLUMNS), DONE_COLUMN_ID);
+});
+
+test("previousColumn for review gates is the prior enabled stage", () => {
+  assert.equal(previousColumn("preview-agenda", COLUMNS)?.id, "prep-agenda");
+  assert.equal(previousColumn("preview-fry", COLUMNS)?.id, "fry");
+  assert.equal(previousColumn("approve", COLUMNS)?.id, "write-plan");
 });
 
 test("orphaned tickets land on stage 01 of the current flow", () => {

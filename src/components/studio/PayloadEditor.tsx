@@ -35,6 +35,11 @@ export function useStagePayload(ticket: Ticket) {
     grillRounds: ticket.grillRounds,
     prompt: stage?.prompt,
     columns: config.columns,
+    prompts: config.prompts,
+    promptTemplate: resolved.baseBody || column?.promptTemplate,
+    agent: column?.agent,
+    promptRef: column?.promptRef,
+    webllmProfile: column?.webllmProfile,
   });
 
   const load = useCallback(async () => {
@@ -46,6 +51,7 @@ export function useStagePayload(ticket: Ticket) {
           ticket,
           columnId: ticket.columnId,
           promptId: resolved.studioPromptId,
+          promptTemplate: resolved.baseBody || column?.promptTemplate,
           docs: resolved.docs,
           jira: config.connectors.jira,
           jiraKeys: resolved.jiraKeys,

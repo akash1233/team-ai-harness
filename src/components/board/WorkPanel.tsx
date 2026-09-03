@@ -5,12 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { columnById } from "@/lib/columns";
-import { buildContext, outputVarName } from "@/lib/flow-context";
+import { buildContext, outputVarName, reviewSourceText } from "@/lib/flow-context";
 import { flowStageMentionedKeys, getFlowStage } from "@/lib/flow-spec";
 import { formatSpend } from "@/lib/format";
 import { isManualStep, resolveStep } from "@/lib/agents";
 import { stagePurpose } from "@/lib/stage-purpose";
-import { formatGrillRecord } from "@/lib/grill";
 import { GrillRoom } from "@/components/studio/GrillRoom";
 import { RunLog } from "@/components/studio/RunLog";
 import { PayloadEditor, useStagePayload } from "@/components/studio/PayloadEditor";
@@ -227,20 +226,15 @@ function StepBody({ ticket }: { ticket: Ticket }) {
   if (col.role === "collect-input" && col.id === "ideation") return <IdeationForm ticket={ticket} />;
   if (col.role === "collect-input" && col.id === "transcript") return <TranscriptForm ticket={ticket} />;
   if (isManualStep(col)) return <ManualCaptureForm ticket={ticket} col={col} />;
-  if (col.role === "review" || col.role === "approve") return <ReviewForm ticket={ticket} />;
+  if (col.role === "review" || col.role === "approve") {
+    return <ReviewForm key={`${ticket.id}:${ticket.columnId}`} ticket={ticket} />;
+  }
   if (col.id === "fry") return <GrillRoom ticket={ticket} />;
   if (col.id === "write-plan") return <PlanForm ticket={ticket} />;
   if (col.id === "file-jira") return <JiraForm ticket={ticket} />;
   if (col.role === "prompt" || col.role === "plan") return <RunForm ticket={ticket} />;
-  if (col.id === "done") {
-    return <DoneForm ticket={ticket} />;
-  }
-  if (col.id === "blocked") {
-    return (
-      <div className="rounded-md border border-danger/40 bg-inset p-3 text-sm text-danger">
-        {ticket.blockedReason || "Blocked"}
-      </div>
-    );
+  if (col.role === "terminal") {
+    return col.id === "done" ? <DoneForm ticket={ticket} /> : null;
   }
   return <RunForm ticket={ticket} />;
 }
@@ -431,36 +425,29 @@ function ReviewForm({ ticket }: { ticket: Ticket }) {
   const approve = useBoardStore((s) => s.approve);
   const columns = useBoardStore((s) => s.config.columns);
   const col = columnById(ticket.columnId, columns);
-  const sourceId =
-    col?.id === "preview-agenda"
-      ? "prep-agenda"
-      : col?.id === "preview-synthesize"
-        ? "synthesize"
-        : col?.id === "preview-fry"
-          ? "fry"
-          : col?.id === "approve"
-            ? "write-plan"
-            : ticket.columnId;
-  const body =
-    col?.id === "preview-fry"
-      ? formatGrillRecord(ticket) || ticket.outputs.fry || ""
-      : ticket.outputs[sourceId] || ticket.outputs[ticket.columnId] || "";
+  const initial = reviewSourceText(ticket, col, columns);
+  const [body, setBody] = useState(initial);
+  const showPlan = col?.role === "approve" && Boolean(ticket.plan);
 
   return (
     <div className="flex flex-col gap-3">
-      {col?.id === "approve" && ticket.plan ? (
-        <PlanPreview ticket={ticket} />
-      ) : (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed text-fg">
-          {body || "Nothing to preview yet."}
-        </pre>
-      )}
+      <p className="text-sm text-muted">
+        Edit the previous stage output if needed, then Approve to continue. This stage does not run an agent.
+      </p>
+      {showPlan ? <PlanPreview ticket={ticket} /> : null}
+      <Textarea
+        className="min-h-48"
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Nothing to review yet — complete the previous stage first."
+      />
       <Button
         variant="primary"
         size="md"
         className="w-full"
+        disabled={!body.trim()}
         onClick={() => {
-          approve(ticket.id);
+          approve(ticket.id, body);
           toast.success("Moved to the next stage");
         }}
       >

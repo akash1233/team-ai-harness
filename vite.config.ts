@@ -31,6 +31,21 @@ function hasGlobbedMigrations(root: string): boolean {
  * PGLite instance it never queries.
  */
 /** Browser WebLLM logs → `npm run dev` stdout. */
+/** New id each `vite` process so session pipeline edits die on real boot, not on refresh. */
+function kindlingBootPlugin(): Plugin {
+  const bootId = `boot-${Date.now()}`;
+  return {
+    name: "kindling-boot-id",
+    config() {
+      return {
+        define: {
+          "import.meta.env.VITE_KINDLING_BOOT_ID": JSON.stringify(bootId),
+        },
+      };
+    },
+  };
+}
+
 function kindlingLogPlugin(): Plugin {
   return {
     name: "kindling-dev-log",
@@ -204,6 +219,7 @@ export default defineConfig(({ command, isPreview }) => ({
     exclude: ["@mlc-ai/web-llm"],
   },
   plugins: [
+    kindlingBootPlugin(),
     kindlingLogPlugin(),
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.

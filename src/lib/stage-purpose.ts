@@ -12,9 +12,11 @@ export function stagePurpose(column: Pick<WorkflowColumn, "id" | "role" | "outpu
     case "plan":
       return key ? `Agent writes {{${key}}}.` : "Agent writes the stage result.";
     case "review":
-      return "Review, then continue.";
+      return key
+        ? `Edit the previous stage output, then Approve to write {{${key}}}.`
+        : "Edit the previous stage output, then Approve to continue.";
     case "approve":
-      return "Approve to continue.";
+      return "Edit if needed, then Approve to continue.";
     case "terminal":
       return column.id === DONE_COLUMN_ID ? "Finished work." : "Parked or blocked.";
     default:

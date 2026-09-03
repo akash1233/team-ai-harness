@@ -3,7 +3,6 @@ import type { Flow, GrillQuestion, GrillRound, PipelineRun, TeamConfig, TeamDoc,
 import type { LinkedJira, LinkedRepo } from "./connectors";
 import { connectorVars, hydrateLinkedJiras, mergeConnectors } from "./connectors";
 import {
-  BLOCKED_COLUMN_ID,
   DISCOVERY_FLOW_ID,
   DONE_COLUMN_ID,
   FILE_JIRA_COLUMN_ID,
@@ -12,25 +11,28 @@ import {
   SEND_SLACK_COLUMN_ID,
   nextColumnId,
   parkOrphanTickets,
+  previousColumn,
   resolveActiveStage,
   startColumnId,
   TRANSCRIPT_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
   columnById,
 } from "./columns";
-import { clearTicketHistory, createSampleTickets, STORAGE_KEY } from "./sample-data";
+import { beginStageRun, clearTicketHistory, createSampleTickets, STORAGE_KEY } from "./sample-data";
 import { extractNotifyMcpResult } from "./discovery-slack";
+import { getAppBootId } from "./app-boot";
 import {
   activeFlow,
   applyActiveFlow,
   createDefaultTeam,
   mergeTeamConfig,
   patchActiveFlow,
+  restoreSessionPipeline,
   writeFlowColumns,
 } from "./team-config";
 import { stageOutputFromLog } from "./cli-session";
-import { harvestVars, harvestBriefVars, harvestNotifyVars, outputVarName, readManualOutput, syncNotifyPreviewVars } from "./flow-context";
-import { isManualStep, resolveStep } from "./agents";
+import { harvestVars, harvestBriefVars, harvestNotifyVars, harvestReviewVars, outputVarName, readManualOutput, reviewSourceText, syncNotifyPreviewVars } from "./flow-context";
+import { isManualStep, isReviewGate, resolveStep } from "./agents";
 import { promptIdForColumn, resolveStagePrompt, unbindJiraKey } from "./prompts";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
@@ -68,7 +70,7 @@ type BoardState = {
   resetTeam: () => void;
   openPrompt: (columnId: string | null) => void;
   advance: (id: string) => void;
-  approve: (id: string) => void;
+  approve: (id: string, editedText?: string) => void;
   block: (id: string, reason: string) => void;
   failTicket: (id: string, reason: string, columnId?: string, via?: string, input?: string) => void;
   runColumn: (columnId: string) => Promise<void>;
@@ -128,6 +130,7 @@ function persistNow(
         tickets: state.tickets,
         flowRuns: state.flowRuns,
         config: state.config,
+        bootId: getAppBootId(),
         selectedId: state.selectedId,
         activeStageId: state.activeStageId,
         activeMemberId: state.activeMemberId,
@@ -179,6 +182,7 @@ async function invokeStageAgent(
     columnId: opts.columnId,
     grillSubmit: opts.grillSubmit,
     promptId: resolved.studioPromptId,
+    promptTemplate: resolved.baseBody || liveCol?.promptTemplate,
     execution: config.execution,
     stepAgent: liveCol?.agent,
     docs: resolved.docs,
@@ -253,14 +257,20 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   hydrate: () => {
     if (typeof window === "undefined") return;
+    if (get().hydrated) return;
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<
           Pick<BoardState, "tickets" | "flowRuns" | "config" | "selectedId" | "activeStageId" | "activeMemberId">
-        >;
+        > & { bootId?: string };
         if (Array.isArray(parsed.tickets) && parsed.tickets.length > 0) {
-          const config = parsed.config ? mergeTeamConfig(parsed.config) : createDefaultTeam();
+          const sameBoot = parsed.bootId === getAppBootId();
+          const config = parsed.config
+            ? sameBoot
+              ? restoreSessionPipeline(parsed.config)
+              : mergeTeamConfig(parsed.config)
+            : createDefaultTeam();
           set({
             tickets: parkOrphanTickets(
               parsed.tickets.map((t) => stampTicket(t, config.activeFlowId)),
@@ -314,8 +324,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         const next: Ticket = {
           ...t,
           columnId,
-          status: columnId === DONE_COLUMN_ID ? "done" : t.status === "done" ? "idle" : t.status,
-          blockedReason: columnId === BLOCKED_COLUMN_ID ? t.blockedReason : undefined,
+          status: columnId === DONE_COLUMN_ID ? "done" : t.status === "done" || t.status === "blocked" ? "idle" : t.status,
+          blockedReason: undefined,
         };
         if (columnId === SEND_SLACK_COLUMN_ID) {
           next.vars = syncNotifyPreviewVars(next);
@@ -420,31 +430,62 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     get().moveTicket(id, next);
   },
 
-  approve: (id) => get().advance(id),
+  approve: (id, editedText) => {
+    const ticket = get().tickets.find((x) => x.id === id);
+    if (!ticket) return;
+    const columns = get().config.columns;
+    const col = columnById(ticket.columnId, columns);
+    if (!col || !isReviewGate(col)) {
+      get().advance(id);
+      return;
+    }
+    const source = previousColumn(col.id, columns);
+    const body = (editedText ?? reviewSourceText(ticket, col, columns)).trim();
+    const at = new Date().toISOString();
+    if (body) {
+      set({
+        tickets: withTicket(get().tickets, id, (t) => {
+          const parsedPlan = col.role === "approve" || source?.role === "plan" ? extractPlan(body) : undefined;
+          const outputs = { ...t.outputs, [col.id]: body };
+          if (source) outputs[source.id] = body;
+          return {
+            ...t,
+            plan: parsedPlan ?? t.plan,
+            outputs,
+            vars: harvestReviewVars({ ...t, vars: t.vars ?? {} }, col, source, body),
+            agentResponses: [
+              {
+                id: uid("resp"),
+                at,
+                columnId: col.id,
+                summary: "Approved",
+                body,
+                via: "review",
+                ok: true,
+              },
+              ...t.agentResponses,
+            ],
+          };
+        }),
+      });
+      pushFlowRun(get, set, {
+        at,
+        flowId: ticket.flowId || get().config.activeFlowId,
+        ticketId: ticket.id,
+        ticketKey: ticket.key,
+        columnId: col.id,
+        variable: outputVarName(col) || outputVarName(source),
+        output: body,
+        via: "review",
+        ok: true,
+        summary: "Approved",
+      });
+    }
+    get().advance(id);
+  },
 
   block: (id, reason) => {
-    set({
-      tickets: withTicket(get().tickets, id, (t) => ({
-        ...t,
-        columnId: BLOCKED_COLUMN_ID,
-        status: "blocked",
-        blockedReason: reason,
-        agentResponses: [
-          {
-            id: uid("resp"),
-            at: new Date().toISOString(),
-            columnId: t.columnId,
-            summary: "Moved to Blocked",
-            body: reason,
-            ok: false,
-            error: reason,
-          },
-          ...t.agentResponses,
-        ],
-      })),
-      activeStageId: BLOCKED_COLUMN_ID,
-    });
-    get().persist();
+    get().failTicket(id, reason);
   },
 
   failTicket: (id, reason, columnId, via, input) => {
@@ -497,13 +538,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       get().tickets.find((t) => t.id === get().selectedId && t.columnId === columnId) ??
       get().tickets.find((t) => t.columnId === columnId && t.status !== "executing");
     if (!ticket) {
+      if (isReviewGate(col)) return;
       const id = get().addTicket({ title: col.name, description: "" });
       get().moveTicket(id, columnId);
       ticket = get().tickets.find((t) => t.id === id);
     }
     if (!ticket) return;
     get().select(ticket.id);
-    if (col.role === "review" || col.role === "approve") {
+    if (isReviewGate(col)) {
       get().approve(ticket.id);
       return;
     }
@@ -566,21 +608,24 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       return;
     }
 
-    if (col.role === "review" || col.role === "approve") {
+    if (isReviewGate(col)) {
       get().approve(id);
       return;
     }
 
-    set({ tickets: withTicket(get().tickets, id, { status: "executing" }) });
+    const step = resolveStep(col, get().config.execution);
+    set({
+      tickets: withTicket(get().tickets, id, (t) =>
+        beginStageRun(t, col, {
+          loadingText: step.kind === "webllm" ? `Loading ${step.label}…` : "Running…",
+        }),
+      ),
+    });
 
     try {
       const latest = get().tickets.find((t) => t.id === id);
       if (!latest) return;
       const liveCol = columnById(latest.columnId, get().config.columns);
-      const step = resolveStep(liveCol, get().config.execution);
-      if (step.kind === "webllm") {
-        set({ tickets: withTicket(get().tickets, id, { liveLog: `Loading ${step.label}…` }) });
-      }
       const result = await invokeStageAgent(get, {
         ticket: latest,
         columnId: latest.columnId,
@@ -849,24 +894,30 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       answer: (answers[q.n] ?? q.answer ?? q.recommended).trim(),
     }));
 
+    const fryCol = columnById(FRY_COLUMN_ID, get().config.columns);
+    const grillStep = resolveStep(fryCol, get().config.execution);
     set({
-      tickets: withTicket(get().tickets, id, (t) => ({
-        ...t,
-        grillRounds: t.grillRounds.map((r) =>
-          r.id === last.id ? { ...r, questions: filled, submitted: true } : r,
+      tickets: withTicket(get().tickets, id, (t) =>
+        beginStageRun(
+          {
+            ...t,
+            grillRounds: t.grillRounds.map((r) =>
+              r.id === last.id ? { ...r, questions: filled, submitted: true } : r,
+            ),
+          },
+          fryCol ?? { id: FRY_COLUMN_ID, outputKey: "grill" },
+          {
+            loadingText: grillStep.kind === "webllm" ? `Loading ${grillStep.label}…` : "Running…",
+            keepGrillRounds: true,
+          },
         ),
-        status: "executing",
-      })),
+      ),
     });
 
     try {
       const latest = get().tickets.find((t) => t.id === id);
       if (!latest) return;
       const liveCol = columnById(FRY_COLUMN_ID, get().config.columns);
-      const step = resolveStep(liveCol, get().config.execution);
-      if (step.kind === "webllm") {
-        set({ tickets: withTicket(get().tickets, id, { liveLog: `Loading ${step.label}…` }) });
-      }
       const result = await invokeStageAgent(get, {
         ticket: latest,
         columnId: FRY_COLUMN_ID,
@@ -922,7 +973,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           return {
             ...t,
             status: "idle",
-            liveLog: step.kind === "webllm" ? undefined : t.liveLog,
+            liveLog: grillStep.kind === "webllm" ? undefined : t.liveLog,
             spend: Math.round((t.spend + spendDelta) * 100) / 100,
             grillRounds: nextRounds,
             fryComplete: Boolean(result.grill?.frontierEmpty),
@@ -1042,7 +1093,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     if (isManualStep(col) || col.role === "terminal") {
       return { ok: false, text: "", error: "This stage is not an agent run" };
     }
-    if (col.role === "review" || col.role === "approve") {
+    if (isReviewGate(col)) {
       get().approve(ticket.id);
       return { ok: true, text: "Approved", variable: outputVarName(col) };
     }
@@ -1217,8 +1268,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         get().persist();
         return;
       }
-      if (next.role === "review" && flow.autoRun) continue;
-      if (isManualStep(next) || next.role === "approve") {
+      if (isManualStep(next) || isReviewGate(next)) {
         get().persist();
         return;
       }

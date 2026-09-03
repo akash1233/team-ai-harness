@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildContext, buildUpstream, harvestBriefVars, harvestNotifyVars, harvestVars, interpolate, mentionedKeys, outputVarName, syncNotifyPreviewVars } from "./flow-context.ts";
+import { COLUMNS } from "./columns.ts";
+import { buildContext, buildUpstream, harvestBriefVars, harvestNotifyVars, harvestReviewVars, harvestVars, interpolate, mentionedKeys, outputVarName, reviewSourceText, syncNotifyPreviewVars } from "./flow-context.ts";
 import type { Ticket, WorkflowColumn } from "./types.ts";
 
 const col: WorkflowColumn = {
@@ -57,6 +58,30 @@ test("harvestVars publishes outputKey, column id, and prev", () => {
   assert.equal(vars.spec, "The spec body");
   assert.equal(vars.synthesize, "The spec body");
   assert.equal(vars.prev, "The spec body");
+});
+
+test("reviewSourceText reads the previous stage output", () => {
+  const review = COLUMNS.find((c) => c.id === "preview-agenda")!;
+  const text = reviewSourceText(
+    { ...ticket, columnId: "preview-agenda", vars: { agenda: "Six-section agenda" }, outputs: { "prep-agenda": "Six-section agenda" } },
+    review,
+    COLUMNS,
+  );
+  assert.equal(text, "Six-section agenda");
+});
+
+test("harvestReviewVars writes approved key and updates the source variable", () => {
+  const review = COLUMNS.find((c) => c.id === "preview-agenda")!;
+  const source = COLUMNS.find((c) => c.id === "prep-agenda")!;
+  const vars = harvestReviewVars(
+    { ...ticket, vars: { agenda: "Original agenda" } },
+    review,
+    source,
+    "Edited agenda",
+  );
+  assert.equal(vars["approved-agenda"], "Edited agenda");
+  assert.equal(vars.agenda, "Edited agenda");
+  assert.equal(vars.prev, "Edited agenda");
 });
 
 test("mentionedKeys lists unique tokens", () => {

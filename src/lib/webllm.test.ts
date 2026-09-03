@@ -86,6 +86,8 @@ test("stageUsesWebllm follows pin then inherit", () => {
   assert.equal(stageUsesWebllm({ agent: "inherit", role: "prompt" }, exec), true);
   assert.equal(stageUsesWebllm({ agent: "cursor", role: "prompt" }, exec), false);
   assert.equal(stageUsesWebllm({ agent: "inherit", role: "collect-input" }, exec), false);
+  assert.equal(stageUsesWebllm({ agent: "inherit", role: "review" }, exec), false);
+  assert.equal(stageUsesWebllm({ agent: "inherit", role: "approve" }, exec), false);
 });
 
 test("Quality profile is the 8B model", () => {
@@ -152,6 +154,8 @@ test("WebLLM runtime queues a second job behind the active download", async () =
   const { loadDisplayPct, webllmPublicStatus } = await import("./webllm-runtime.ts");
   assert.equal(loadDisplayPct(100), 90);
   assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "load", pct: 34, text: "shard 2/8" }).label, "Downloading");
+  assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "load", pct: 34, text: "Loading Qwen3-1.7B from browser cache." }).label, "From cache");
+  assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "generate", text: "Qwen3-1.7B already in this tab." }).label, "Writing");
   assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "load", pct: 34, text: "shard 2/8" }).pct, 34);
   assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "load", pct: 100, text: "done?" }).pct, 90);
   assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "generate", text: "token dump" }).label, "Writing");

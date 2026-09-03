@@ -7,10 +7,13 @@ test("stagePurpose uses output key and role, not last-run text", () => {
   const brief = COLUMNS.find((c) => c.id === IDEATION_COLUMN_ID)!;
   const spec = COLUMNS.find((c) => c.id === SYNTHESIZE_COLUMN_ID)!;
   const done = COLUMNS.find((c) => c.id === DONE_COLUMN_ID)!;
+  const review = COLUMNS.find((c) => c.id === "preview-agenda")!;
   assert.match(stagePurpose(brief), /\{\{brief\}\}/);
   assert.match(stagePurpose(brief), /You add this/);
   assert.match(stagePurpose(spec), /\{\{spec\}\}/);
   assert.match(stagePurpose(spec), /Agent writes/);
+  assert.match(stagePurpose(review), /Approve/);
+  assert.match(stagePurpose(review), /\{\{approved-agenda\}\}/);
   assert.match(stagePurpose(done), /Finished/);
 });
 

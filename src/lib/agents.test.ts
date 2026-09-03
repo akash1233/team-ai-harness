@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveStep, stepLabel, legacyDefaultAgent, stepBadge } from "./agents.ts";
+import { isReviewGate, isRunnableStage, resolveStep, stepLabel, legacyDefaultAgent, stepBadge } from "./agents.ts";
 import { DEFAULT_PRICING } from "./pricing.ts";
 import type { ExecutionConfig } from "./types.ts";
 
@@ -74,6 +74,16 @@ test("stepBadge shows Manual for manual stages", () => {
   assert.equal(stepBadge({ agent: "manual", role: "prompt" }, exec), "Manual");
   assert.equal(stepBadge({ agent: "cursor", role: "prompt" }, exec), "Cursor");
   assert.equal(stepBadge({ agent: "webllm", role: "prompt" }, exec), "WebLLM");
+});
+
+test("review and approve are gates, not runnable agent stages", () => {
+  assert.equal(isReviewGate({ role: "review" }), true);
+  assert.equal(isReviewGate({ role: "approve" }), true);
+  assert.equal(isReviewGate({ role: "prompt" }), false);
+  assert.equal(isRunnableStage({ role: "review" }), false);
+  assert.equal(isRunnableStage({ role: "approve" }), false);
+  assert.equal(isRunnableStage({ role: "prompt" }), true);
+  assert.equal(isRunnableStage({ role: "collect-input" }), true);
 });
 
 test("WebLLM pin ignores Cursor local/remote target", () => {

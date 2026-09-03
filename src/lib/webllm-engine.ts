@@ -2,7 +2,6 @@ import { mergePricing, usageFromText } from "./pricing.ts";
 import type { ExecutionConfig, TokenUsage } from "./types.ts";
 import {
   hasWebGpu,
-  isDefaultWebllmModel,
   resolveWebllmModel,
   WEBLLM_PROFILES,
   type WebllmColumnRef,
@@ -73,8 +72,18 @@ export type WebllmCall = {
 
 type LoadedEngine = { modelId: string; engine: MlcEngine };
 
-let loaded: LoadedEngine | null = null;
-let loadQueue: { modelId: string; promise: Promise<MlcEngine> } | null = null;
+type EngineSlot = {
+  loaded: LoadedEngine | null;
+  loadQueue: { modelId: string; promise: Promise<MlcEngine> } | null;
+};
+
+const ENGINE_SLOT = "__kindlingWebllmEngine";
+
+function engineSlot(): EngineSlot {
+  const g = globalThis as typeof globalThis & { [ENGINE_SLOT]?: EngineSlot };
+  if (!g[ENGINE_SLOT]) g[ENGINE_SLOT] = { loaded: null, loadQueue: null };
+  return g[ENGINE_SLOT];
+}
 
 function logLine(parts: string[]): string {
   return parts.filter(Boolean).join("\n");
@@ -100,8 +109,16 @@ export async function ensureWebllmEngine(
     emitAppConsole(`[kindling] ${new Date().toISOString()} INFO  exec.webllm ${p.phase}${pct} modelId=${modelId}`);
   };
 
-  if (loaded?.modelId === modelId) return loaded.engine;
-  if (loadQueue?.modelId === modelId) {
+  const slot = engineSlot();
+  if (slot.loaded?.modelId === modelId) {
+    note({
+      phase: "generate",
+      modelId,
+      text: `${modelId} already in this tab — using the cached engine.`,
+    });
+    return slot.loaded.engine;
+  }
+  if (slot.loadQueue?.modelId === modelId) {
     log.info("load.queue", { modelId, reason: "same-model" });
     note({
       phase: "queued",
@@ -109,22 +126,22 @@ export async function ensureWebllmEngine(
       text: `Queued — waiting for ${modelId} already downloading.`,
     });
     if (job?.id) updateWebllmJob(job.id, { phase: "queued", text: `Waiting for ${modelId}` });
-    return loadQueue.promise;
+    return slot.loadQueue.promise;
   }
-  if (loadQueue) {
-    log.info("load.queue", { modelId, waitingOn: loadQueue.modelId });
+  if (slot.loadQueue) {
+    log.info("load.queue", { modelId, waitingOn: slot.loadQueue.modelId });
     note({
       phase: "queued",
       modelId,
-      text: `Queued behind ${loadQueue.modelId}.`,
+      text: `Queued behind ${slot.loadQueue.modelId}.`,
     });
-    if (job?.id) updateWebllmJob(job.id, { phase: "queued", text: `Queued behind ${loadQueue.modelId}` });
+    if (job?.id) updateWebllmJob(job.id, { phase: "queued", text: `Queued behind ${slot.loadQueue.modelId}` });
     try {
-      await loadQueue.promise;
+      await slot.loadQueue.promise;
     } catch {
       /* previous load failed; try the requested model */
     }
-    if (loaded?.modelId === modelId) return loaded.engine;
+    if (engineSlot().loaded?.modelId === modelId) return engineSlot().loaded!.engine;
   }
 
   const promise = (async () => {
@@ -132,7 +149,6 @@ export async function ensureWebllmEngine(
       throw new Error("WebGPU is not available. Use Chrome or Edge on this Mac.");
     }
     const vramMb = WEBLLM_PROFILES.find((p) => p.modelId === modelId)?.vramMb;
-    log.info("load.start", { modelId, vramMb });
     if (vramMb && vramMb >= 5000) {
       log.warn("load.vram", {
         modelId,
@@ -140,29 +156,41 @@ export async function ensureWebllmEngine(
         hint: "Quality 8B needs ~6GB GPU. Chrome can freeze with no new logs. Use Fast if this tab hangs.",
       });
     }
+    let mod: WebllmModule;
+    try {
+      mod = await loadWebllmModule();
+    } catch {
+      throw new Error("WebLLM package is missing. Run npm install and restart npm run dev.");
+    }
+    const appConfig = kindlingAppConfig(mod);
+    let cached = false;
+    if (typeof mod.hasModelInCache === "function") {
+      try {
+        cached = await mod.hasModelInCache(modelId, appConfig);
+      } catch {
+        cached = false;
+      }
+    }
+    log.info("load.start", { modelId, vramMb, cached });
     note({
       phase: "load",
       modelId,
       pct: 0,
-      text:
-        vramMb && vramMb >= 5000
-          ? `Downloading ${modelId} (~${Math.round(vramMb / 1024)} GB GPU). Chrome may freeze until this finishes.`
+      text: cached
+        ? `Loading ${modelId} from browser cache.`
+        : vramMb && vramMb >= 5000
+          ? `Downloading ${modelId} (~${Math.round(vramMb / 1024)} GB GPU). First run caches weights in this browser.`
           : `Downloading ${modelId} — first run caches weights in this browser.`,
     });
     await persistRecentLogs();
-    let mod: { CreateMLCEngine: (id: string, opts?: Record<string, unknown>) => Promise<MlcEngine> };
-    try {
-      mod = (await import("@mlc-ai/web-llm")) as unknown as typeof mod;
-    } catch {
-      throw new Error("WebLLM package is missing. Run npm install and restart npm run dev.");
-    }
-    if (loaded && loaded.modelId !== modelId) {
+    const live = engineSlot();
+    if (live.loaded && live.loaded.modelId !== modelId) {
       try {
-        await loaded.engine.unload?.();
+        await live.loaded.engine.unload?.();
       } catch {
         /* swap anyway */
       }
-      loaded = null;
+      live.loaded = null;
     }
     let lastPct = -1;
     let lastLogAt = 0;
@@ -170,16 +198,17 @@ export async function ensureWebllmEngine(
     try {
     engine = await withTimeout(
       mod.CreateMLCEngine(modelId, {
+        appConfig,
         initProgressCallback: (report: { text?: string; progress?: number }) => {
           const pct = typeof report.progress === "number" ? Math.round(report.progress * 100) : undefined;
-          const detail = report.text?.trim() || `Downloading ${modelId}`;
+          const detail = report.text?.trim() || (cached ? `Loading ${modelId} from cache` : `Downloading ${modelId}`);
           const text = pct != null ? `${detail} · ${pct}%` : detail;
           note({ phase: "load", modelId, pct, text });
           const now = Date.now();
           if (pct != null && (pct === 0 || pct === 100 || pct - lastPct >= 5 || now - lastLogAt > 2000)) {
             lastPct = pct ?? lastPct;
             lastLogAt = now;
-            log.info("load.progress", { modelId, pct, detail });
+            log.info("load.progress", { modelId, pct, detail, cached });
             if (pct === 25 || pct === 50 || pct === 75 || pct === 100) void persistRecentLogs();
           }
         },
@@ -199,17 +228,17 @@ export async function ensureWebllmEngine(
       }
       throw err;
     }
-    loaded = { modelId, engine };
-    log.info("load.ok", { modelId });
+    engineSlot().loaded = { modelId, engine };
+    log.info("load.ok", { modelId, cached });
     note({ phase: "load", modelId, pct: 90, text: `${modelId} ready — starting generation.` });
     return engine;
   })();
-  loadQueue = { modelId, promise };
+  engineSlot().loadQueue = { modelId, promise };
 
   try {
     return await promise;
   } finally {
-    if (loadQueue?.promise === promise) loadQueue = null;
+    if (engineSlot().loadQueue?.promise === promise) engineSlot().loadQueue = null;
   }
 }
 
@@ -297,12 +326,13 @@ export async function runWebllmCompletion(opts: {
   const model = resolveWebllmModel(opts.column, opts.execution);
   const via = `WebLLM · ${model.label}`;
   const pricing = mergePricing(opts.execution?.pricing);
+  const warm = loadedWebllmModelId() === model.modelId;
   const jobId = enqueueWebllmJob({
     modelId: model.modelId,
-    text: `Starting ${via}…`,
+    text: warm ? `${model.modelId} already in this tab.` : `Starting ${via}…`,
     ticketKey: opts.job?.ticketKey,
     columnLabel: opts.job?.columnLabel ?? via,
-    phase: "load",
+    phase: warm ? "generate" : "load",
   });
   const span = startCall("exec.webllm", {
     via,
@@ -481,11 +511,18 @@ export type WebllmRuntimeStatus = {
 };
 
 type WebllmModule = {
-  prebuiltAppConfig?: { model_list?: Array<Record<string, unknown>> };
+  prebuiltAppConfig?: { model_list?: Array<Record<string, unknown>>; cacheBackend?: string };
   modelVersion?: string;
   hasModelInCache?: (modelId: string, appConfig?: unknown) => Promise<boolean>;
   CreateMLCEngine: (id: string, opts?: Record<string, unknown>) => Promise<MlcEngine>;
 };
+
+function kindlingAppConfig(mod: WebllmModule) {
+  return {
+    ...(mod.prebuiltAppConfig ?? { model_list: [] }),
+    cacheBackend: "indexeddb" as const,
+  };
+}
 
 async function loadWebllmModule(): Promise<WebllmModule> {
   return (await import("@mlc-ai/web-llm")) as unknown as WebllmModule;
@@ -517,17 +554,18 @@ function asLlmCatalog(list: Array<Record<string, unknown>> | undefined): WebllmC
 }
 
 export function loadedWebllmModelId(): string | null {
-  return loaded?.modelId ?? null;
+  return engineSlot().loaded?.modelId ?? null;
 }
 
 export async function unloadWebllmEngine(): Promise<void> {
-  if (!loaded) return;
+  const live = engineSlot();
+  if (!live.loaded) return;
   try {
-    await loaded.engine.unload?.();
+    await live.loaded.engine.unload?.();
   } catch {
     /* still drop the handle */
   }
-  loaded = null;
+  live.loaded = null;
 }
 
 export async function getWebllmStatus(exec?: ExecutionConfig | null): Promise<WebllmRuntimeStatus> {
@@ -539,7 +577,7 @@ export async function getWebllmStatus(exec?: ExecutionConfig | null): Promise<We
     webgpuDetail: gpu ? "navigator.gpu is present" : "Use Chrome or Edge with WebGPU.",
     packageVersion: "@mlc-ai/web-llm",
     modelVersion: "",
-    loadedModelId: loaded?.modelId ?? null,
+    loadedModelId: engineSlot().loaded?.modelId ?? null,
     activeModelId: active.modelId,
     activeLabel,
     catalogCount: 0,
@@ -555,7 +593,7 @@ export async function getWebllmStatus(exec?: ExecutionConfig | null): Promise<We
       await Promise.all(
         catalog.map(async (entry) => {
           try {
-            entry.cached = await mod.hasModelInCache!(entry.modelId, mod.prebuiltAppConfig);
+            entry.cached = await mod.hasModelInCache!(entry.modelId, kindlingAppConfig(mod));
           } catch {
             entry.cached = false;
           }

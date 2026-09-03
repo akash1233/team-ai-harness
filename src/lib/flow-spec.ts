@@ -1,6 +1,5 @@
 import discoveryFlowJson from "../../flows/discovery.flow.json" with { type: "json" };
 import { isAgentKind } from "./agents.ts";
-import { DISCOVERY_FLOW_ID } from "./columns.ts";
 import { buildContext, interpolate, mentionedKeys } from "./flow-context.ts";
 import type { StepAgent, TeamDoc, Ticket, WebllmProfile } from "./types.ts";
 import { isWebllmProfile } from "./webllm.ts";
@@ -81,30 +80,47 @@ function grillPhase(ticket: Ticket, grillSubmit?: boolean): string {
 
 const DEFAULT_MAX_TOKENS = 4000;
 
+function jsonPromptBody(stage: FlowStageSpec | undefined): string {
+  if (!stage?.prompt) return "";
+  return [stage.prompt.system, stage.prompt.user].filter((part) => part?.trim()).join("\n\n").trim();
+}
+
 /**
- * Resolves system + user prompt for a stage from discovery.flow.json.
- * Returns undefined when the stage has no prompt (manual, review, terminal).
+ * Resolves system + user for a run. Boot JSON is the default; a session
+ * promptTemplate (Settings / Pipeline) wins for the rest of the session.
  */
 export function resolveFlowStagePrompt(
   stageId: string,
   ticket: Ticket,
   docs?: TeamDoc[],
-  opts?: { grillSubmit?: boolean },
+  opts?: { grillSubmit?: boolean; promptTemplate?: string },
 ): { system: string; user: string; max: number } | undefined {
   const stage = getFlowStage(stageId);
-  if (!stage?.prompt) return undefined;
-
+  const live = opts?.promptTemplate?.trim() || undefined;
+  const jsonBody = jsonPromptBody(stage);
   const ctx = buildContext(ticket, docs);
   if (stageId === "fry") {
     ctx.grillPhase = grillPhase(ticket, opts?.grillSubmit);
   }
+  const max = stage?.maxTokens ?? DEFAULT_MAX_TOKENS;
+  const defaultSystem = "Produce a concise operator-facing result.";
+  const sessionEdited = Boolean(live && jsonBody && live !== jsonBody);
+  const customOnly = Boolean(live && !stage?.prompt);
+
+  if (sessionEdited || customOnly) {
+    return {
+      system: defaultSystem,
+      user: interpolate(live!, ctx).trim(),
+      max,
+    };
+  }
+
+  if (!stage?.prompt) return undefined;
 
   const system = interpolate(stage.prompt.system ?? "", ctx).trim();
   const user = interpolate(stage.prompt.user ?? "", ctx).trim();
-  const max = stage.maxTokens ?? DEFAULT_MAX_TOKENS;
-
   return {
-    system: system || "Produce a concise operator-facing result.",
+    system: system || defaultSystem,
     user,
     max,
   };
@@ -115,5 +131,5 @@ export function discoveryFlowPath(): string {
 }
 
 export function isDiscoveryFlow(flowId?: string): boolean {
-  return !flowId || flowId === DISCOVERY_FLOW_ID;
+  return !flowId || flowId === loadDiscoveryFlowSpec().id;
 }

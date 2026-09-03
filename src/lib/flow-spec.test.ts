@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { BLOCKED_COLUMN_ID, COLUMNS, columnsFromFlowSpec } from "./columns.ts";
 import {
   clearFlowSpecCache,
   discoveryFlowPath,
@@ -57,6 +58,20 @@ test("listFlowVariables documents the system catalog", () => {
   assert.ok(vars.brief);
   assert.ok(vars.jira);
   assert.ok(vars.slackMessage);
+  assert.ok(vars["approved-agenda"]);
+});
+
+test("review stages write the approved previous output and have no agent prompt", () => {
+  const agendaReview = getFlowStage("preview-agenda");
+  const specReview = getFlowStage("preview-synthesize");
+  const fryReview = getFlowStage("preview-fry");
+  assert.equal(agendaReview?.role, "review");
+  assert.deepEqual(agendaReview?.writes, ["approved-agenda", "prev"]);
+  assert.equal(agendaReview?.prompt, undefined);
+  assert.equal(specReview?.role, "review");
+  assert.deepEqual(specReview?.writes, ["spec", "prev"]);
+  assert.equal(fryReview?.role, "review");
+  assert.deepEqual(fryReview?.writes, ["grill", "prev"]);
 });
 
 test("Agenda prompt contains brief and all linked Jiras only", () => {
@@ -112,20 +127,64 @@ test("Discovery flow pins Agenda and Spec to WebLLM; Notify stays Cursor", () =>
   assert.equal(flowStageAgent("prep-agenda"), "webllm");
   assert.equal(flowStageWebllmProfile("prep-agenda"), "fast");
   assert.equal(flowStageAgent("synthesize"), "webllm");
-  assert.equal(flowStageWebllmProfile("synthesize"), "quality");
+  assert.equal(flowStageWebllmProfile("synthesize"), "fast");
   assert.equal(flowStageAgent("send-slack"), "cursor");
   assert.equal(flowStageWebllmProfile("send-slack"), undefined);
 });
 
-test("Spec prompt is a short in-browser synthesis, not a repo-explore skill", () => {
+test("board columns match discovery.flow.json stages and omit Blocked", () => {
+  const flow = loadDiscoveryFlowSpec();
+  const columns = columnsFromFlowSpec(flow);
+  assert.deepEqual(
+    columns.map((c) => c.id),
+    flow.stages.map((s) => s.id),
+  );
+  assert.ok(columns.some((c) => c.id === "done"));
+  assert.equal(
+    columns.some((c) => c.id === BLOCKED_COLUMN_ID),
+    false,
+  );
+  assert.deepEqual(
+    COLUMNS.map((c) => c.id),
+    flow.stages.map((s) => s.id),
+  );
+  assert.equal(
+    columns.every((c) => !c.locked),
+    true,
+  );
+});
+
+test("Spec prompt interpolates conversation and attached Jira from the flow JSON", () => {
   const prompt = resolveFlowStagePrompt("synthesize", {
     ...baseTicket,
     transcript: "Maya: ship voice on Grill first.",
+    linkedJiras: [{ key: "X2-1", title: "Voice", description: "Mic", status: "Open", url: "" }],
   });
   assert.ok(prompt);
-  assert.match(prompt!.user, /Notes:/);
+  assert.match(prompt!.user, /Conversation:/);
   assert.match(prompt!.user, /ship voice on Grill first/);
-  assert.match(prompt!.system, /Spec document only/);
-  assert.doesNotMatch(prompt!.system, /explore the repo/i);
-  assert.doesNotMatch(prompt!.system, /setup-matt-pocock/);
+  assert.match(prompt!.user, /X2-1 Voice/);
+});
+
+test("session promptTemplate is used for later runs until boot reloads JSON", () => {
+  const fromJson = resolveFlowStagePrompt("prep-agenda", baseTicket);
+  const matching = resolveFlowStagePrompt("prep-agenda", baseTicket, undefined, {
+    promptTemplate: getFlowStage("prep-agenda")?.prompt
+      ? [getFlowStage("prep-agenda")!.prompt!.system, getFlowStage("prep-agenda")!.prompt!.user]
+          .filter((part) => part?.trim())
+          .join("\n\n")
+      : "",
+  });
+  const edited = resolveFlowStagePrompt("prep-agenda", baseTicket, undefined, {
+    promptTemplate: "Session agenda for {{brief}} only.",
+  });
+  const custom = resolveFlowStagePrompt("custom-stage", baseTicket, undefined, {
+    promptTemplate: "Echo {{brief}}",
+  });
+  assert.equal(matching?.user, fromJson?.user);
+  assert.equal(matching?.system, fromJson?.system);
+  assert.match(edited!.user, /Session agenda for/);
+  assert.match(edited!.user, /Slack channel: #dx/);
+  assert.doesNotMatch(edited!.user, /Write the agenda now/);
+  assert.equal(custom?.user, "Echo Slack channel: #dx\nChannel ID: C1");
 });

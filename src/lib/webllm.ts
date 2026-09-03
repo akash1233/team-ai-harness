@@ -111,6 +111,7 @@ export function stageUsesWebllm(
 ): boolean {
   if (!column) return false;
   if (column.agent === "manual" || column.role === "collect-input") return false;
+  if (column.role === "review" || column.role === "approve" || column.role === "terminal") return false;
   if (column.agent === "webllm") return true;
   if (column.agent && column.agent !== "inherit") return false;
   return exec?.defaultAgent === "webllm";

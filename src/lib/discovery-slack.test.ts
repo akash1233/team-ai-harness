@@ -52,6 +52,14 @@ test("resolveAgendaDocument prefers harvested vars.agenda", () => {
   assert.equal(resolveAgendaDocument(t), "From var");
 });
 
+test("resolveAgendaDocument prefers approved-agenda after review", () => {
+  const t = ticket({
+    vars: { agenda: "From agenda run", "approved-agenda": "Edited in review" },
+    outputs: { "prep-agenda": "From output" },
+  });
+  assert.equal(resolveAgendaDocument(t), "Edited in review");
+});
+
 test("composeSlackMessage adds Jira header and full agenda body", () => {
   const t = ticket({ linkedJiras: [{ key: "X2-99", title: "Epic", description: "", status: "", url: "" }] });
   const body = composeSlackMessage(t, "1. Goals\n2. Users");

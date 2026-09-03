@@ -1,5 +1,6 @@
-import type { Ticket } from "./types.ts";
-import { DISCOVERY_FLOW_ID, IDEATION_COLUMN_ID } from "./columns.ts";
+import type { Ticket, WorkflowColumn } from "./types.ts";
+import { DISCOVERY_FLOW_ID, FRY_COLUMN_ID, IDEATION_COLUMN_ID, WRITE_PLAN_COLUMN_ID } from "./columns.ts";
+import { outputVarName } from "./flow-context.ts";
 
 function iso(h: number, m: number, s = 0) {
   return new Date(Date.UTC(2026, 7, 28, h + 4, m, s)).toISOString();
@@ -80,3 +81,32 @@ export function clearTicketHistory(
 }
 
 export const STORAGE_KEY = "kindling-v1";
+
+/** Drop this stage's last result so a new run does not show stale output. */
+export function beginStageRun(
+  ticket: Ticket,
+  column: Pick<WorkflowColumn, "id" | "outputKey">,
+  opts?: { loadingText?: string; keepGrillRounds?: boolean },
+): Ticket {
+  const key = outputVarName(column);
+  const oldBody = ticket.outputs[column.id] || (key ? ticket.vars?.[key] : undefined) || ticket.liveLog;
+  const outputs = { ...ticket.outputs };
+  delete outputs[column.id];
+  const vars = { ...ticket.vars };
+  delete vars[column.id];
+  if (key) delete vars[key];
+  if (oldBody && vars.prev === oldBody) delete vars.prev;
+  return {
+    ...ticket,
+    status: "executing",
+    blockedReason: undefined,
+    liveLog: opts?.loadingText ?? "",
+    liveInput: undefined,
+    sessionDir: undefined,
+    outputs,
+    vars,
+    fryComplete: column.id === FRY_COLUMN_ID ? false : ticket.fryComplete,
+    grillRounds: column.id === FRY_COLUMN_ID && !opts?.keepGrillRounds ? [] : ticket.grillRounds,
+    plan: column.id === WRITE_PLAN_COLUMN_ID ? null : ticket.plan,
+  };
+}

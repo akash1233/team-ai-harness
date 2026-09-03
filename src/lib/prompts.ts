@@ -18,9 +18,9 @@ export function flowStagePromptBody(stageId: string): string | undefined {
 }
 
 /**
- * flows/discovery.flow.json is the source of truth for stage prompts. Any saved
- * library body for a JSON-backed stage is stale — overwrite it on merge so the
- * Settings UI matches what actually runs. In-app edits are session-only by design.
+ * flows/discovery.flow.json is the source of truth for the Discovery pipeline.
+ * Saved library bodies for JSON-backed stages are stale — overwrite them on
+ * boot so Settings matches what actually runs. In-app edits are session-only.
  */
 export function canonicalizeFlowPrompts(prompts: TeamPrompt[]): TeamPrompt[] {
   return prompts.map((prompt) => {
@@ -89,14 +89,13 @@ export function resolveStagePrompt(
   col: WorkflowColumn | undefined,
   prompts: TeamPrompt[] | undefined,
   docs: TeamDoc[] | undefined,
-): { body: string; studioPromptId?: string; docs: TeamDoc[]; jiraKeys: string[] } {
+): { body: string; baseBody: string; studioPromptId?: string; docs: TeamDoc[]; jiraKeys: string[] } {
   const list = prompts ?? [];
   const library = docs ?? [];
   const p =
     (col?.promptRef ? list.find((x) => x.id === col.promptRef) : undefined) ??
     (col ? list.find((x) => x.id === promptIdForColumn(col.id)) : undefined);
-  const baseBody =
-    col?.id === SEND_SLACK_COLUMN_ID ? NOTIFY_PROMPT_TEMPLATE : (p?.body ?? col?.promptTemplate ?? "");
+  const baseBody = p?.body ?? col?.promptTemplate ?? "";
   const body = baseBody;
   const skillIds = p?.skillIds ?? [];
   const attached = skillIds
@@ -107,6 +106,7 @@ export function resolveStagePrompt(
     .join("");
   return {
     body: `${body}${skillBlock}`.trim(),
+    baseBody,
     studioPromptId: p?.studioPromptId || col?.promptId,
     docs: attached.length ? attached : library,
     jiraKeys: p?.jiraKeys ?? [],

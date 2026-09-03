@@ -1,11 +1,11 @@
-import { Play } from "lucide-react";
+import { Check, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
 import { columnById, DISCOVERY_FLOW_ID } from "@/lib/columns";
 import { formatSpend } from "@/lib/format";
-import { isManualStep, resolveStep } from "@/lib/agents";
-import { outputVarName } from "@/lib/flow-context";
+import { isReviewGate, isRunnableStage, resolveStep } from "@/lib/agents";
+import { outputVarName, reviewSourceText } from "@/lib/flow-context";
 import { stagePurpose } from "@/lib/stage-purpose";
 import { ExecutionTrail } from "./ExecutionTrail";
 import type { Ticket } from "@/lib/types";
@@ -17,21 +17,18 @@ export function TicketList() {
   const selectedId = useBoardStore((s) => s.selectedId);
   const select = useBoardStore((s) => s.select);
   const runColumn = useBoardStore((s) => s.runColumn);
+  const approve = useBoardStore((s) => s.approve);
   const col = columnById(activeStageId, config.columns);
   const inFlow = tickets.filter((t) => (t.flowId || DISCOVERY_FLOW_ID) === config.activeFlowId);
+  const waiting = inFlow.filter((t) => t.columnId === activeStageId);
   const inStage = inFlow.filter(
     (t) =>
       t.columnId === activeStageId ||
       Boolean(t.outputs[activeStageId]) ||
       t.agentResponses.some((r) => r.columnId === activeStageId),
   );
-  const runnable =
-    col &&
-    (col.role === "prompt" ||
-      col.role === "plan" ||
-      col.role === "review" ||
-      col.role === "approve" ||
-      isManualStep(col));
+  const reviewGate = isReviewGate(col);
+  const runnable = isRunnableStage(col);
   const busy = inFlow.some((t) => t.status === "executing");
   const step = col ? resolveStep(col, config.execution) : null;
 
@@ -43,7 +40,7 @@ export function TicketList() {
             {col
               ? `${String(config.columns.findIndex((c) => c.id === col.id) + 1).padStart(2, "0")} · ${col.role.replace("-", " ")}`
               : "Pick a stage"}
-            {step && col && (col.role === "prompt" || col.role === "plan" || isManualStep(col)) ? ` · ${step.label}` : ""}
+            {step && col && isRunnableStage(col) ? ` · ${step.label}` : ""}
             {col?.outputKey ? ` · {{${col.outputKey}}}` : ""}
           </p>
           <h1 className="font-serif text-3xl font-medium tracking-tight md:text-4xl">{col?.label || col?.name || "Stage"}</h1>
@@ -51,7 +48,22 @@ export function TicketList() {
             {col ? stagePurpose(col) : "Pick a stage from the rail."}
           </p>
         </div>
-        {runnable ? (
+        {reviewGate ? (
+          <Button
+            variant="primary"
+            size="md"
+            disabled={waiting.length === 0}
+            onClick={() => {
+              const ticket = waiting.find((t) => t.id === selectedId) ?? waiting[0];
+              if (!ticket) return;
+              select(ticket.id);
+              approve(ticket.id);
+            }}
+          >
+            <Check className="size-4" />
+            Approve
+          </Button>
+        ) : runnable ? (
           <Button variant="primary" size="md" disabled={busy} onClick={() => void runColumn(activeStageId)}>
             <Play className="size-4 fill-current" />
             {busy ? "Running…" : inStage.length === 0 ? `Start · ${step?.label ?? "stage"}` : step?.manual ? "Save & continue" : `Run ${step?.label ?? "stage"}`}
@@ -110,10 +122,12 @@ function TicketCard({
   const output =
     ticket.status === "executing"
       ? ticket.liveLog || ""
-      : (writes && ticket.vars?.[writes]) ||
-        ticket.outputs[stageId] ||
-        last?.body ||
-        "";
+      : isReviewGate(stageCol)
+        ? reviewSourceText(ticket, stageCol, config.columns)
+        : (writes && ticket.vars?.[writes]) ||
+          ticket.outputs[stageId] ||
+          last?.body ||
+          "";
   const error = ticket.blockedReason || (last?.ok === false ? last.error || last.body : "");
 
   return (

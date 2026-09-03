@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { COLUMNS, PREP_AGENDA_COLUMN_ID, SYNTHESIZE_COLUMN_ID, WRITE_PLAN_COLUMN_ID, startColumnId } from "./columns.ts";
 import { buildContext, harvestVars, interpolate, outputVarName } from "./flow-context.ts";
-import { clearTicketHistory } from "./sample-data.ts";
+import { beginStageRun, clearTicketHistory } from "./sample-data.ts";
 import type { Ticket } from "./types.ts";
 
 function ticket(over: Partial<Ticket> = {}): Ticket {
@@ -43,7 +43,7 @@ test("Discovery agents: agenda WebLLM, spec WebLLM, plan Cursor", () => {
   assert.equal(agenda?.agent, "webllm");
   assert.equal(agenda?.webllmProfile, "fast");
   assert.equal(spec?.agent, "webllm");
-  assert.equal(spec?.webllmProfile, "quality");
+  assert.equal(spec?.webllmProfile, "fast");
   assert.equal(plan?.agent, "cursor");
 });
 
@@ -59,13 +59,11 @@ test("brief harvested from ideation becomes {{brief}} for Agenda (Cursor)", () =
   assert.equal(outputVarName(agenda), "agenda");
 });
 
-test("spec (Studio) prompt reads brief + transcript from prior stages", () => {
+test("spec prompt reads transcript from prior stages", () => {
   let t = ticket();
-  t = { ...t, vars: harvestVars(t, COLUMNS.find((c) => c.id === "ideation")!, "channel #dx") };
   t = { ...t, vars: harvestVars(t, COLUMNS.find((c) => c.id === "transcript")!, t.transcript) };
   const spec = COLUMNS.find((c) => c.id === SYNTHESIZE_COLUMN_ID)!;
   const filled = interpolate(spec.promptTemplate || "", buildContext(t));
-  assert.match(filled, /channel #dx/);
   assert.match(filled, /ship voice on Grill first/);
 });
 
@@ -116,4 +114,29 @@ test("clearTicketHistory removes run data and parks the ticket at the flow start
   assert.deepEqual(cleared.vars, {});
   assert.deepEqual(cleared.agentResponses, []);
   assert.equal(cleared.blockedReason, undefined);
+});
+
+test("beginStageRun drops this stage's last output so a new run starts blank", () => {
+  const col = COLUMNS.find((c) => c.id === PREP_AGENDA_COLUMN_ID)!;
+  const started = beginStageRun(
+    ticket({
+      columnId: PREP_AGENDA_COLUMN_ID,
+      status: "blocked",
+      blockedReason: "timeout",
+      liveLog: "old stream",
+      outputs: { "prep-agenda": "old agenda", synthesize: "keep spec" },
+      vars: { agenda: "old agenda", spec: "keep spec", prev: "old agenda", brief: "keep brief" },
+    }),
+    col,
+    { loadingText: "Loading WebLLM · Fast…" },
+  );
+  assert.equal(started.status, "executing");
+  assert.equal(started.blockedReason, undefined);
+  assert.equal(started.liveLog, "Loading WebLLM · Fast…");
+  assert.equal(started.outputs["prep-agenda"], undefined);
+  assert.equal(started.outputs.synthesize, "keep spec");
+  assert.equal(started.vars.agenda, undefined);
+  assert.equal(started.vars.spec, "keep spec");
+  assert.equal(started.vars.brief, "keep brief");
+  assert.equal(started.vars.prev, undefined);
 });

@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { ExecutionConfig, GrillQuestion, Plan, SlackPost, StepAgent, TeamDoc, Ticket, JiraIssue, WorkflowColumn } from "./types";
 import { mergeJiraIssues, type JiraConnection, type LinkedJira } from "./connectors";
-import { buildContext } from "./flow-context";
+import { buildContext, interpolate } from "./flow-context";
 import { resolveFlowStagePrompt } from "./flow-spec";
 import {
   COLUMNS,
@@ -155,7 +155,7 @@ async function resolveStagePayload(data: AgentInput): Promise<{
   } = data;
   const issues = await resolveJiraIssues(ticket.linkedJiras ?? [], jiraIssues, jiraKeys, jira);
   const promptTicket = { ...ticket, linkedJiras: issues };
-  const fromFlow = resolveFlowStagePrompt(columnId, promptTicket, docs, { grillSubmit });
+  const fromFlow = resolveFlowStagePrompt(columnId, promptTicket, docs, { grillSubmit, promptTemplate });
   let prompt: { system: string; user: string; max: number };
 
   if (fromFlow) {
@@ -169,10 +169,11 @@ async function resolveStagePayload(data: AgentInput): Promise<{
   } else {
     const col = columnById(columnId, columns);
     const ctx = buildContext(promptTicket, docs);
+    const template = promptTemplate || col?.promptTemplate || "";
     prompt = {
       max: 4000,
       system: "You are a pipeline stage. Reply with the stage output only — the final answer, no preamble.",
-      user: ctx.input || ctx.context || col?.promptTemplate || "",
+      user: interpolate(template, ctx).trim() || ctx.input || ctx.context || "",
     };
   }
 

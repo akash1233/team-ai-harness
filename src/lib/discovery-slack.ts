@@ -118,7 +118,12 @@ export function extractNotifyMcpResult(log: string): NotifyMcpExtract {
 
 /** Approved agenda document from harvested var or stage output. */
 export function resolveAgendaDocument(ticket: Ticket): string {
-  return (ticket.vars?.agenda || ticket.outputs[PREP_AGENDA_COLUMN_ID] || "").trim();
+  return (
+    ticket.vars?.["approved-agenda"] ||
+    ticket.vars?.agenda ||
+    ticket.outputs[PREP_AGENDA_COLUMN_ID] ||
+    ""
+  ).trim();
 }
 
 /** Compose the Slack post body: optional Jira/ticket header + full agenda. */

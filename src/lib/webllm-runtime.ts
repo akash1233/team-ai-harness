@@ -39,12 +39,17 @@ export function loadDisplayPct(mlcPct?: number): number | undefined {
   return Math.min(90, Math.max(0, mlcPct));
 }
 
+export function isWebllmCacheLoad(text?: string): boolean {
+  return /cache|already in this tab|ready —/i.test(text ?? "");
+}
+
 /** Short copy for the board. Detail belongs in App log. */
 export function webllmPublicStatus(job: WebllmRuntimeJob | null): { label: string; pct?: number; indeterminate?: boolean } {
   if (!job) return { label: "" };
   if (job.phase === "queued") return { label: "Waiting", indeterminate: true };
   if (job.phase === "load") {
     const pct = loadDisplayPct(job.pct);
+    if (isWebllmCacheLoad(job.text)) return { label: pct != null && pct >= 90 ? "Preparing" : "From cache", pct };
     return { label: pct != null && pct >= 90 ? "Preparing" : "Downloading", pct };
   }
   if (job.phase === "generate") return { label: "Writing", indeterminate: true };

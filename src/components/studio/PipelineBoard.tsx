@@ -1,9 +1,9 @@
-import { Play } from "lucide-react";
+import { Check, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
-import { DISCOVERY_FLOW_ID, BLOCKED_COLUMN_ID } from "@/lib/columns";
-import { isManualStep, resolveStep, stepBadge } from "@/lib/agents";
+import { DISCOVERY_FLOW_ID } from "@/lib/columns";
+import { isReviewGate, isRunnableStage, resolveStep, stepBadge } from "@/lib/agents";
 import { stagePurpose } from "@/lib/stage-purpose";
 import { ExecutionTrail } from "./ExecutionTrail";
 import { TicketNote } from "./TicketNote";
@@ -17,6 +17,7 @@ export function PipelineBoard() {
   const setActiveStage = useBoardStore((s) => s.setActiveStage);
   const moveTicket = useBoardStore((s) => s.moveTicket);
   const runColumn = useBoardStore((s) => s.runColumn);
+  const approve = useBoardStore((s) => s.approve);
   const execution = config.execution;
   const flowId = config.activeFlowId;
   const inFlow = tickets.filter((t) => (t.flowId || DISCOVERY_FLOW_ID) === flowId);
@@ -33,16 +34,10 @@ export function PipelineBoard() {
           const step = resolveStep(col, execution);
           const badge = stepBadge(col, execution);
           const failed =
-            col.id === BLOCKED_COLUMN_ID
-              ? here.length > 0
-              : here.some((t) => t.status === "blocked") ||
-                inFlow.some((t) => t.agentResponses.some((r) => r.columnId === col.id && r.ok === false));
-          const runnable =
-            col.role === "prompt" ||
-            col.role === "plan" ||
-            col.role === "review" ||
-            col.role === "approve" ||
-            isManualStep(col);
+            here.some((t) => t.status === "blocked") ||
+            inFlow.some((t) => t.agentResponses.some((r) => r.columnId === col.id && r.ok === false));
+          const reviewGate = isReviewGate(col);
+          const runnable = isRunnableStage(col);
           const busy = here.some((t) => t.status === "executing");
 
           return (
@@ -81,7 +76,9 @@ export function PipelineBoard() {
                   </span>
                 </div>
                 <p className="mt-2 text-2xs leading-relaxed text-muted">{stagePurpose(col)}</p>
-                {lastRun ? (
+                {busy ? (
+                  <p className="mt-2 text-micro text-muted">Running…</p>
+                ) : lastRun ? (
                   <p className={cn("mt-2 text-micro", lastRun.ok === false ? "text-danger" : "text-subtle")}>
                     {lastRun.ok === false ? "Last run failed" : "Last run ok"}
                     {lastRun.via ? ` · ${lastRun.via}` : ""}
@@ -89,7 +86,25 @@ export function PipelineBoard() {
                 ) : (
                   <p className="mt-2 text-micro text-subtle">Not run yet</p>
                 )}
-                {runnable ? (
+                {reviewGate ? (
+                  <Button
+                    variant={failed ? "secondary" : "primary"}
+                    size="md"
+                    className="mt-3 w-full"
+                    disabled={here.length === 0}
+                    title="Approve the previous stage output and move on"
+                    onClick={() => {
+                      const ticket = here.find((t) => t.id === selectedId) ?? here[0];
+                      if (!ticket) return;
+                      setActiveStage(col.id);
+                      select(ticket.id);
+                      approve(ticket.id);
+                    }}
+                  >
+                    <Check className="size-3.5" />
+                    Approve
+                  </Button>
+                ) : runnable ? (
                   <Button
                     variant={failed ? "secondary" : "primary"}
                     size="md"

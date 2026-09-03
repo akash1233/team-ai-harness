@@ -6,7 +6,7 @@ import { useBoardStore } from "@/lib/board-store";
 import { cn } from "@/lib/cn";
 import type { AgentKind, AgentTarget, ColumnRole, DensityId, PipelineLayout, StepAgent, ThemeId, WebllmProfile } from "@/lib/types";
 import { createDefaultExecution, executionLabel } from "@/lib/team-config";
-import { AGENT_KINDS, resolveStep } from "@/lib/agents";
+import { AGENT_KINDS, isReviewGate, resolveStep } from "@/lib/agents";
 import { WEBLLM_PROFILES, stageUsesWebllm } from "@/lib/webllm";
 import { WebllmFields } from "@/components/studio/settings/WebllmFields";
 import { inspectCliBins, readAppLogs, testExecution } from "@/lib/discovery-agent";
@@ -27,9 +27,9 @@ type Tab = (typeof TABS)[number];
 const ROLE_LABEL: Record<ColumnRole, string> = {
   "collect-input": "Team types this",
   prompt: "Agent runs",
-  review: "Human review (skipped if auto-run)",
+  review: "Edit previous output, then Approve",
   plan: "Agent writes plan",
-  approve: "Sign-off gate",
+  approve: "Sign-off gate — Approve, no agent run",
   terminal: "End of this flow",
 };
 
@@ -330,6 +330,7 @@ function FlowsTab() {
       <p className="text-sm text-muted">
         A flow is a pipeline. <strong className="font-medium text-fg">New flow</strong> starts blank. <strong className="font-medium text-fg">Example</strong> is Capture (human) → Draft (Cursor, {"{{brief}}"}) → Echo (prints {"{{agenda}}"} only). Duplicate copies the current one.
       </p>
+      <FlowSpecWarning />
       <div className="flex flex-wrap gap-1">
         {config.flows.map((f) => (
           <button
@@ -430,6 +431,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
           This tab only <strong className="font-medium text-fg">designs</strong> the flow. Run it on the board. Pin <strong className="font-medium text-fg">Who runs it</strong> to Cursor, Claude, Studio, CIS, or WebLLM. WebLLM stages also get a performance picker (Fast / Balanced / Quality). Notify stays on Cursor. The variable is the last agent reply only — no logs.
         </p>
       </div>
+      <FlowSpecWarning />
       <ul className="flex flex-col gap-2">
         {columns.map((col, i) => (
           <li key={col.id} className="rounded-md border border-border bg-elevated p-3">
@@ -459,6 +461,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                   ))}
                 </select>
               </label>
+              {isReviewGate(col) ? null : (
               <label className="flex flex-col gap-1">
                 <span className="text-micro text-subtle">Who runs it</span>
                 <select
@@ -476,6 +479,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                   ))}
                 </select>
               </label>
+              )}
               {stageUsesWebllm(col, execution) ? (
                 <label className="flex flex-col gap-1">
                   <span className="text-micro text-subtle">WebLLM performance</span>

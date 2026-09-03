@@ -2,7 +2,8 @@ import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
 import { formatSpend, channelLabel } from "@/lib/format";
 import { columnById } from "@/lib/columns";
-import { outputVarName } from "@/lib/flow-context";
+import { isReviewGate } from "@/lib/agents";
+import { outputVarName, reviewSourceText } from "@/lib/flow-context";
 import { stagePurpose } from "@/lib/stage-purpose";
 import type { Ticket } from "@/lib/types";
 
@@ -14,8 +15,10 @@ export function TicketNote({ ticket, selected, onSelect }: { ticket: Ticket; sel
   const failed = ticket.status === "blocked";
   const output =
     ticket.status === "executing"
-      ? ticket.liveLog || ticket.outputs[ticket.columnId] || last?.body || ""
-      : ticket.outputs[ticket.columnId] || last?.body || "";
+      ? ticket.liveLog || ""
+      : isReviewGate(col)
+        ? reviewSourceText(ticket, col, config.columns)
+        : ticket.outputs[ticket.columnId] || last?.body || "";
   const error = ticket.blockedReason || (last?.ok === false ? last.error || last.body : "");
   const writes = outputVarName(col);
 

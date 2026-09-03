@@ -100,6 +100,17 @@ export function mergeAppEnv(appEnv, processEnv) {
 }
 
 /**
+ * Browser bundles only see `VITE_*`. Copy PIT_LOG_LEVEL so WebLLM logs honor
+ * the same .env knob without leaking other PIT_* values.
+ */
+export function mirrorPitLogLevel(env) {
+  const pit = typeof env.PIT_LOG_LEVEL === "string" ? env.PIT_LOG_LEVEL.trim() : "";
+  const vite = typeof env.VITE_PIT_LOG_LEVEL === "string" ? env.VITE_PIT_LOG_LEVEL.trim() : "";
+  if (pit && !vite) return { ...env, VITE_PIT_LOG_LEVEL: pit };
+  return env;
+}
+
+/**
  * Translate a child's `exit` `(code, signal)` into this process's exit status.
  *
  * Do not re-raise the signal with `process.kill(process.pid, signal)`: under
@@ -145,7 +156,7 @@ function main(argv) {
     process.exit(2);
   }
   const root = projectRoot();
-  const env = mergeAppEnv({ ...readAppEnv(root), ...readDotEnv(root) }, process.env);
+  const env = mirrorPitLogLevel(mergeAppEnv({ ...readAppEnv(root), ...readDotEnv(root) }, process.env));
   const child = spawn(command, args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {

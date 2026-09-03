@@ -1,4 +1,4 @@
-import { IDEATION_COLUMN_ID, SEND_SLACK_COLUMN_ID, TRANSCRIPT_COLUMN_ID } from "./columns.ts";
+import { FRY_COLUMN_ID, IDEATION_COLUMN_ID, previousColumn, SEND_SLACK_COLUMN_ID, TRANSCRIPT_COLUMN_ID } from "./columns.ts";
 import { composeSlackMessage, normalizeSlackChannelName, resolveAgendaDocument } from "./discovery-slack.ts";
 import { formatGrillRecord } from "./grill.ts";
 import type { TeamDoc, Ticket, WorkflowColumn } from "./types";
@@ -19,11 +19,11 @@ export function interpolate(template: string, ctx: Record<string, string>): stri
   return template.replace(TOKEN, (_, key: string) => ctx[key] ?? "");
 }
 
-export function outputVarName(column: WorkflowColumn | undefined): string {
+export function outputVarName(column: { id?: string; outputKey?: string } | undefined): string {
   if (!column) return "";
   const key = column.outputKey?.trim();
   if (key) return key;
-  return column.id.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "");
+  return (column.id ?? "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
 
 export function harvestVars(
@@ -38,6 +38,52 @@ export function harvestVars(
   vars[column.id] = body;
   if (name) vars[name] = body;
   vars.prev = body;
+  return vars;
+}
+
+/** Previous stage body a review gate shows (and can edit) before Approve. */
+export function reviewSourceText(
+  ticket: Ticket,
+  reviewColumn: WorkflowColumn | undefined,
+  columns: WorkflowColumn[],
+): string {
+  if (!reviewColumn) return "";
+  const source = previousColumn(reviewColumn.id, columns);
+  if (source) {
+    if (source.id === FRY_COLUMN_ID || source.outputKey === "grill") {
+      const grill = formatGrillRecord(ticket) || ticket.outputs[source.id] || ticket.vars?.grill || "";
+      if (grill.trim()) return grill.trim();
+    }
+    if ((source.role === "plan" || source.outputKey === "plan") && ticket.plan) {
+      return JSON.stringify(ticket.plan, null, 2);
+    }
+    const key = outputVarName(source);
+    const fromSource =
+      (key && ticket.vars?.[key]) || ticket.outputs[source.id] || ticket.vars?.prev || "";
+    if (fromSource.trim()) return fromSource.trim();
+  }
+  const reviewKey = outputVarName(reviewColumn);
+  return (
+    ticket.outputs[reviewColumn.id] ||
+    (reviewKey && ticket.vars?.[reviewKey]) ||
+    ticket.vars?.prev ||
+    ""
+  ).trim();
+}
+
+/** Approve harvests the (possibly edited) previous body into review + source vars. */
+export function harvestReviewVars(
+  ticket: Ticket,
+  reviewColumn: WorkflowColumn,
+  sourceColumn: WorkflowColumn | undefined,
+  text: string,
+): Record<string, string> {
+  const body = text.trim();
+  const vars = harvestVars(ticket, reviewColumn, body);
+  if (!body || !sourceColumn) return vars;
+  const sourceKey = outputVarName(sourceColumn);
+  vars[sourceColumn.id] = body;
+  if (sourceKey) vars[sourceKey] = body;
   return vars;
 }
 

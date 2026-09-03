@@ -1,6 +1,6 @@
 import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
-import { DISCOVERY_FLOW_ID, BLOCKED_COLUMN_ID } from "@/lib/columns";
+import { DISCOVERY_FLOW_ID } from "@/lib/columns";
 import { stepBadge } from "@/lib/agents";
 
 export function StageRail() {
@@ -22,10 +22,8 @@ export function StageRail() {
         const here = inFlow.filter((t) => t.columnId === col.id);
         const count = here.length;
         const failed =
-          col.id === BLOCKED_COLUMN_ID
-            ? count > 0
-            : here.some((t) => t.status === "blocked") ||
-              inFlow.some((t) => t.agentResponses.some((r) => r.columnId === col.id && r.ok === false));
+          here.some((t) => t.status === "blocked") ||
+          inFlow.some((t) => t.agentResponses.some((r) => r.columnId === col.id && r.ok === false));
         const active = col.id === activeStageId;
         const badge = stepBadge(col, execution);
         return (

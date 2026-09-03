@@ -15,6 +15,7 @@ import {
   sanitizeTerminalScriptName,
   sessionExitLineInLog,
   stageOutputFromLog,
+  stripThinkBlocks,
   toInteractiveArgs,
   withCursorWorkspace,
   withoutFullAgentMode,
@@ -74,6 +75,24 @@ test("cursor gets --workspace", () => {
 test("stageOutputFromLog drops kindling noise", () => {
   const log = `[kindling] starting\nHello agenda\n[kindling] exit 0\n`;
   assert.equal(stageOutputFromLog(log), "Hello agenda");
+});
+
+test("stripThinkBlocks keeps only the document after Qwen thinking", () => {
+  const raw = `<think>\nOkay, the user wants an agenda.\nCover all Jiras.\n</think>\n\n1. Problem / Goals / Metrics\n   - Hyperlinks in SUVs.\n\nRecord the full meeting.`;
+  assert.equal(
+    stripThinkBlocks(raw),
+    "1. Problem / Goals / Metrics\n   - Hyperlinks in SUVs.\n\nRecord the full meeting.",
+  );
+});
+
+test("stageOutputFromLog strips think blocks so pipeline vars stay clean", () => {
+  const log = `[kindling] start\n<think>planning</think>\n\n1. Kickoff\n`;
+  assert.equal(stageOutputFromLog(log), "1. Kickoff");
+});
+
+test("stripThinkBlocks drops an unclosed leading think block", () => {
+  assert.equal(stripThinkBlocks("<think>\nstill reasoning"), "");
+  assert.equal(stripThinkBlocks("Keep this\n<think>\ncut"), "Keep this");
 });
 
 test("retrieval-only log is noise", () => {

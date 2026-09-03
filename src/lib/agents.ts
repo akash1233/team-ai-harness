@@ -1,8 +1,18 @@
-import type { AgentKind, AgentTarget, ExecutionConfig, StepAgent, WorkflowColumn } from "./types.ts";
+import type { AgentKind, AgentTarget, ExecutionConfig, StepAgent, WebllmProfile, WorkflowColumn } from "./types.ts";
+import { resolveWebllmModel } from "./webllm.ts";
 
-export const AGENT_KINDS: AgentKind[] = ["cursor", "claude", "studio", "cis"];
+export const AGENT_KINDS: AgentKind[] = ["cursor", "claude", "studio", "cis", "webllm"];
 
-export type StepColumnRef = { agent?: StepAgent; role?: WorkflowColumn["role"] };
+export function isAgentKind(value: string | undefined): value is AgentKind {
+  return Boolean(value && (AGENT_KINDS as string[]).includes(value));
+}
+
+export type StepColumnRef = {
+  id?: string;
+  agent?: StepAgent;
+  role?: WorkflowColumn["role"];
+  webllmProfile?: WebllmProfile;
+};
 
 export type ResolvedStep = {
   kind: AgentKind;
@@ -16,6 +26,17 @@ export function isManualStep(column?: StepColumnRef | null): boolean {
   if (!column) return false;
   if (column.agent === "manual") return true;
   return column.role === "collect-input";
+}
+
+/** Review / sign-off gate — edit previous output, then Approve. Never an agent run. */
+export function isReviewGate(column?: StepColumnRef | null): boolean {
+  return column?.role === "review" || column?.role === "approve";
+}
+
+/** Stages whose board action is Run / Save, not Approve. */
+export function isRunnableStage(column?: StepColumnRef | null): boolean {
+  if (!column || isReviewGate(column)) return false;
+  return column.role === "prompt" || column.role === "plan" || isManualStep(column);
 }
 
 export function legacyDefaultAgent(exec?: Partial<ExecutionConfig> | null): AgentKind | undefined {
@@ -35,6 +56,10 @@ export function resolveStep(column: StepColumnRef | null | undefined, exec?: Exe
   }
   const agent = column?.agent;
   const kind: AgentKind = agent && agent !== "inherit" && agent !== "manual" ? agent : fallback;
+  if (kind === "webllm") {
+    const model = resolveWebllmModel(column, exec);
+    return { kind, target: "local", label: `WebLLM · ${model.label}`, manual: false };
+  }
   const target: AgentTarget =
     kind === "cursor" ? (exec?.cursorTarget ?? "local") : kind === "claude" ? (exec?.claudeTarget ?? "local") : "remote";
   return { kind, target, label: stepLabel(kind, target), manual: false };
@@ -51,6 +76,7 @@ export function stepBadge(column: StepColumnRef | null | undefined, exec?: Execu
 export function stepLabel(kind: AgentKind, target: AgentTarget): string {
   if (kind === "studio") return "GenAI Studio";
   if (kind === "cis") return "CIS";
+  if (kind === "webllm") return "WebLLM";
   const where = target === "remote" ? "remote" : "local";
   return kind === "claude" ? `Claude ${where}` : `Cursor ${where}`;
 }
@@ -59,6 +85,7 @@ export function shortAgent(kind: AgentKind): string {
   if (kind === "studio") return "Studio";
   if (kind === "cis") return "CIS";
   if (kind === "claude") return "Claude";
+  if (kind === "webllm") return "WebLLM";
   return "Cursor";
 }
 

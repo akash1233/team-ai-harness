@@ -2,7 +2,9 @@ import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
 import { formatSpend, channelLabel } from "@/lib/format";
 import { columnById } from "@/lib/columns";
-import { outputVarName } from "@/lib/flow-context";
+import { isReviewGate } from "@/lib/agents";
+import { outputVarName, reviewSourceText } from "@/lib/flow-context";
+import { stagePurpose } from "@/lib/stage-purpose";
 import type { Ticket } from "@/lib/types";
 
 export function TicketNote({ ticket, selected, onSelect }: { ticket: Ticket; selected: boolean; onSelect: () => void }) {
@@ -11,10 +13,14 @@ export function TicketNote({ ticket, selected, onSelect }: { ticket: Ticket; sel
   const col = columnById(ticket.columnId, config.columns);
   const last = ticket.agentResponses.find((r) => r.columnId === ticket.columnId) ?? ticket.agentResponses[0];
   const failed = ticket.status === "blocked";
-  const output = ticket.outputs[ticket.columnId] || last?.body || "";
+  const output =
+    ticket.status === "executing"
+      ? ticket.liveLog || ""
+      : isReviewGate(col)
+        ? reviewSourceText(ticket, col, config.columns)
+        : ticket.outputs[ticket.columnId] || last?.body || "";
   const error = ticket.blockedReason || (last?.ok === false ? last.error || last.body : "");
   const writes = outputVarName(col);
-  const vars = Object.entries(ticket.vars ?? {}).filter(([, v]) => v.trim());
 
   return (
     <article
@@ -48,10 +54,10 @@ export function TicketNote({ ticket, selected, onSelect }: { ticket: Ticket; sel
           <span className="text-micro uppercase tracking-wide text-subtle">{col?.label ?? ticket.columnId}</span>
         )}
       </div>
-      <h3 className="mt-2 font-serif text-base font-medium leading-snug tracking-tight">{ticket.title}</h3>
-      {ticket.description ? (
-        <p className="mt-2 text-2xs leading-relaxed text-muted">{ticket.description}</p>
-      ) : null}
+      <h3 className="mt-2 font-serif text-base font-medium leading-snug tracking-tight">
+        {col?.label || col?.name || "Stage"}
+      </h3>
+      {col ? <p className="mt-1 text-2xs text-muted">{stagePurpose(col)}</p> : null}
 
       {failed && error ? (
         <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm border border-danger/40 bg-danger/5 p-2 font-mono text-micro text-danger">
@@ -62,33 +68,13 @@ export function TicketNote({ ticket, selected, onSelect }: { ticket: Ticket; sel
           {output}
         </pre>
       ) : (
-        <p className="mt-3 text-micro text-subtle">No agent output yet.</p>
+        <p className="mt-3 text-micro text-subtle">No output yet</p>
       )}
 
-      {last ? (
-        <p className="mt-2 text-micro text-muted">
-          Last run {last.at.replace("T", " ").slice(0, 16)}
-          {last.via ? ` · ${last.via}` : ""}
-          {last.summary ? ` · ${last.summary}` : ""}
-        </p>
-      ) : null}
-
       {writes ? (
-        <p className="mt-1 font-mono text-micro text-subtle">
-          writes {`{{${writes}}}`}
-        </p>
+        <p className="mt-2 font-mono text-micro text-subtle">writes {`{{${writes}}}`}</p>
       ) : null}
-
-      {vars.length > 0 ? (
-        <ul className="mt-2 flex flex-col gap-1">
-          {vars.map(([k, v]) => (
-            <li key={k} className="text-micro">
-              <span className="font-mono text-fg">{k}</span>
-              <span className="ml-1 text-muted">{v.length > 160 ? `${v.slice(0, 160)}…` : v}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      {last?.via ? <p className="mt-1 text-micro text-subtle">{last.via}</p> : null}
 
       {ticket.slackChannel ? (
         <p className="mt-2 text-micro text-muted">Slack {channelLabel(ticket.slackChannel)}</p>

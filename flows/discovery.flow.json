@@ -5,9 +5,11 @@
   "variables": {
     "brief": "Brief composed text from manual Save (Slack channel, ID, members, notes)",
     "agenda": "Full agenda document from Agenda stage",
+    "approved-agenda": "Agenda after Approve Agenda (edited previous output)",
     "transcript": "Meeting notes from Notes stage",
     "spec": "Spec document from Spec stage",
     "grill": "Grill Q&A record",
+    "fyyme": "Fry me Q&A record",
     "plan": "Backlog plan JSON string",
     "slack_post": "Notify post summary after Slack MCP",
     "prev": "Last stage output",
@@ -48,17 +50,19 @@
       "id": "prep-agenda",
       "label": "Agenda",
       "role": "prompt",
-      "agent": "cursor",
+      "agent": "webllm",
+      "webllmProfile": "fast",
       "writes": ["agenda", "prev"],
       "maxTokens": 1100,
       "prompt": {
-        "system": "Write a Team Discussion Agenda with exactly these sections:\n1. Problem / Goals / Metrics\n2. Users / Personas / Stories\n3. Research (competitors / data)\n4. Features / UI / API\n5. Risks / Out of scope / Tech\n6. Priorities\nEnd with: Record the full meeting.\nDo not send Slack. Do not create Jira issues. Agenda document only.\n\nBusiness rules:\n- Brief below = meeting logistics (channel, attendees).\n- Every attached Jira issue = product context; cover all of them, not just the first.\n- If no Jira is attached, use Brief notes only.",
+        "system": "Write a Team Discussion Agenda with exactly these sections , if there are multiple jira's create section for each and call the jira clearly:\n1. Problem / Goals / Metrics\n2. Users / Personas / Stories\n3. Research (competitors / data)\n4. Features / UI / API\n5. Risks / Out of scope / Tech\n6. Priorities\nEnd with: Record the full meeting.\nDo not send Slack. Do not create Jira issues. Agenda document only.\n\nBusiness rules:\n- Brief below = meeting logistics (channel, attendees).\n- Every attached Jira issue = product context; cover all of them, not just the first.\n- If no Jira is attached, use Brief notes only.",
         "user": "Brief (logistics):\n{{brief}}\n\nAll attached Jira issues (product context):\n{{jira}}\n\nWrite the agenda now."
       }
     },
     {
       "id": "preview-agenda",
-      "label": "Review agenda",
+      "writes": ["approved-agenda", "prev"],
+      "label": "Approve Agenda",
       "role": "review"
     },
     {
@@ -75,16 +79,17 @@
     },
     {
       "id": "transcript",
-      "label": "Notes",
+      "label": "Add Sana Transcript",
       "role": "collect-input",
       "agent": "manual",
       "writes": ["transcript", "prev"]
     },
     {
       "id": "synthesize",
-      "label": "Spec",
+      "label": "Transcript To Spec",
       "role": "prompt",
-      "agent": "studio",
+      "agent": "webllm",
+      "webllmProfile": "fast",
       "writes": ["spec", "prev"],
       "maxTokens": 1400,
       "prompt": {
@@ -94,12 +99,13 @@
     },
     {
       "id": "preview-synthesize",
+      "writes": ["spec", "prev"],
       "label": "Review spec",
       "role": "review"
     },
     {
       "id": "fry",
-      "label": "Grill",
+      "label": "Fryme Questionarre",
       "role": "prompt",
       "agent": "claude",
       "writes": ["grill", "prev"],
@@ -111,12 +117,13 @@
     },
     {
       "id": "preview-fry",
-      "label": "Review grill",
+      "writes": ["grill", "prev"],
+      "label": "Review Fry Me data",
       "role": "review"
     },
     {
       "id": "write-plan",
-      "label": "Backlog",
+      "label": "Plan Write Up - EPIC Stories",
       "role": "plan",
       "agent": "cursor",
       "writes": ["plan", "prev"],
@@ -128,12 +135,13 @@
     },
     {
       "id": "approve",
-      "label": "Sign-off",
+      "writes": ["plan", "prev"],
+      "label": "Sign-off Plan",
       "role": "approve"
     },
     {
       "id": "file-jira",
-      "label": "File",
+      "label": "File planned Jira's ",
       "role": "prompt",
       "agent": "cursor",
       "maxTokens": 4000,
@@ -145,11 +153,6 @@
     {
       "id": "done",
       "label": "Done",
-      "role": "terminal"
-    },
-    {
-      "id": "blocked",
-      "label": "Blocked",
       "role": "terminal"
     }
   ]

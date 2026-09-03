@@ -1,14 +1,14 @@
 # Pipeline flow specs
 
-Kindling stage prompts and variable contracts live here as JSON. **Edit these files to change what each agent stage receives** — runtime only interpolates `{{tokens}}` from the prompt text.
+Kindling stage lists, agents, prompts, and variable contracts live here as JSON. **Edit these files to change the pipeline** — the board loads this on boot. Settings → Pipeline / Prompts edits apply for the session only and are wiped on reload.
 
 ## Discovery flow
 
 **File:** [`discovery.flow.json`](./discovery.flow.json)
 
-Stages: Brief → Agenda → Review agenda → Notify → Notes → Spec → Grill → Backlog → File.
+Stages: Brief → Agenda → Review agenda → Notify → Notes → Spec → Grill → Backlog → File → Done.
 
-Loader: [`src/lib/flow-spec.ts`](../src/lib/flow-spec.ts) (`resolveFlowStagePrompt`, `listFlowVariables`).
+Loader: [`src/lib/flow-spec.ts`](../src/lib/flow-spec.ts) (`columnsFromFlowSpec`, `resolveFlowStagePrompt`, `listFlowVariables`). There is no extra hardcoded Blocked column.
 
 ## System variables
 

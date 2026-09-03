@@ -1,4 +1,6 @@
-import type { WorkflowColumn } from "./types";
+import discoveryFlowJson from "../../flows/discovery.flow.json" with { type: "json" };
+import type { FlowSpec, FlowStageSpec } from "./flow-spec.ts";
+import type { ColumnRole, RailTone, StepAgent, WebllmProfile, WorkflowColumn } from "./types";
 
 export const IDEATION_COLUMN_ID = "ideation";
 export const PREP_AGENDA_COLUMN_ID = "prep-agenda";
@@ -30,173 +32,57 @@ Post this message verbatim — do not rewrite:
 
 {{slackMessage}}`;
 
-export const COLUMNS: WorkflowColumn[] = [
-  {
-    id: IDEATION_COLUMN_ID,
-    name: "Ideation",
-    label: "Brief",
-    role: "collect-input",
-    rail: "run",
-    enabled: true,
-    agent: "manual",
-    promptTemplate:
-      "Who to notify for the meeting agenda. Slack channel (single #) and/or team members.",
-  },
-  {
-    id: PREP_AGENDA_COLUMN_ID,
-    name: "Prep Agenda",
-    label: "Agenda",
-    role: "prompt",
-    rail: "run",
-    enabled: true,
-    agent: "cursor",
-    promptTemplate: `Write a Team Discussion Agenda with exactly these sections:
-1. Problem / Goals / Metrics
-2. Users / Personas / Stories
-3. Research (competitors / data)
-4. Features / UI / API
-5. Risks / Out of scope / Tech
-6. Priorities
-End with: Record the full meeting.
-Do not send Slack. Do not create Jira issues. Agenda document only.`,
-  },
-  {
-    id: PREVIEW_AGENDA_COLUMN_ID,
-    name: "Preview Agenda",
-    label: "Review agenda",
-    role: "review",
-    rail: "review",
-    enabled: true,
-  },
-  {
-    id: SEND_SLACK_COLUMN_ID,
-    name: "Slack — Send Agenda",
-    label: "Notify",
-    role: "prompt",
-    rail: "run",
-    enabled: true,
-    agent: "cursor",
-    promptTemplate: NOTIFY_PROMPT_TEMPLATE,
-  },
-  {
-    id: TRANSCRIPT_COLUMN_ID,
-    name: "Transcript",
-    label: "Notes",
-    role: "collect-input",
-    rail: "idle",
-    enabled: true,
-    agent: "manual",
-    promptTemplate: "Paste the meeting transcript or notes.",
-  },
-  {
-    id: SYNTHESIZE_COLUMN_ID,
-    name: "Synthesize",
-    label: "Spec",
-    role: "prompt",
-    rail: "run",
-    enabled: true,
-    agent: "studio",
-    promptTemplate: `Turn ideation, the Jira issue, and the meeting transcript into a spec.
-Cover: problem, solution, user stories, implementation decisions, testing decisions, out of scope.
-Do not interview. Do not create Jira issues.
+const COLUMN_ROLES: ColumnRole[] = ["collect-input", "prompt", "review", "plan", "approve", "terminal"];
+const AGENT_VALUES = ["manual", "cursor", "claude", "studio", "cis", "webllm"] as const;
+const WEBLLM_PROFILES: WebllmProfile[] = ["fast", "balanced", "quality"];
 
-Brief:
-{{brief}}
+function isColumnRole(role: string): role is ColumnRole {
+  return (COLUMN_ROLES as string[]).includes(role);
+}
 
-Notes:
-{{transcript}}`,
-  },
-  {
-    id: PREVIEW_SYNTHESIZE_COLUMN_ID,
-    name: "Preview Synthesize",
-    label: "Review spec",
-    role: "review",
-    rail: "review",
-    enabled: true,
-  },
-  {
-    id: FRY_COLUMN_ID,
-    name: "Fryme",
-    label: "Grill",
-    role: "prompt",
-    rail: "run",
-    enabled: true,
-    agent: "claude",
-    promptTemplate: `Interview relentlessly as a design tree against the Synthesize spec.
-Each round, ask the whole frontier: numbered questions, each with a recommended answer.
-The team answers. Wait for those answers before the next round.
-When the frontier is empty, emit conclusions, remaining risks, and decisions Write plan must honor.
+function railFor(role: ColumnRole): RailTone {
+  if (role === "review") return "review";
+  if (role === "plan" || role === "approve" || role === "terminal") return "gate";
+  return "run";
+}
 
-Spec:
-{{spec}}
+function stagePromptBody(stage: FlowStageSpec): string | undefined {
+  const parts = [stage.prompt?.system, stage.prompt?.user].filter((part) => part?.trim());
+  return parts.length ? parts.join("\n\n") : undefined;
+}
 
-Prior grill:
-{{grill}}`,
-  },
-  {
-    id: PREVIEW_FRY_COLUMN_ID,
-    name: "Preview Fryme",
-    label: "Review grill",
-    role: "review",
-    rail: "review",
-    enabled: true,
-  },
-  {
-    id: WRITE_PLAN_COLUMN_ID,
-    name: "Write plan",
-    label: "Backlog",
-    role: "plan",
-    rail: "gate",
-    enabled: true,
-    agent: "cursor",
-    promptTemplate: `Turn the Jira problem, synthesis, and Fryme output into a Jira backlog plan: epics and stories only. No implementation.
-Honor Grill Me answers as binding decisions.
+function stageAgent(stage: FlowStageSpec): StepAgent | undefined {
+  const agent = stage.agent;
+  if (agent && (AGENT_VALUES as readonly string[]).includes(agent)) return agent as StepAgent;
+  return undefined;
+}
 
-Spec:
-{{spec}}
+function stageOutputKey(stage: FlowStageSpec): string | undefined {
+  return stage.writes?.find((key) => key !== "prev");
+}
 
-Grill:
-{{grill}}
+/** Board columns for a flow spec. JSON stages are the list — nothing is appended. */
+export function columnsFromFlowSpec(flow: FlowSpec): WorkflowColumn[] {
+  return flow.stages.map((stage) => {
+    const role = isColumnRole(stage.role) ? stage.role : "prompt";
+    const profile = WEBLLM_PROFILES.find((id) => id === stage.webllmProfile);
+    return {
+      id: stage.id,
+      name: stage.label,
+      label: stage.label,
+      role,
+      rail: railFor(role),
+      enabled: true,
+      agent: stageAgent(stage),
+      webllmProfile: profile,
+      outputKey: stageOutputKey(stage),
+      promptTemplate: stagePromptBody(stage),
+    };
+  });
+}
 
-Emit ${PLAN_JSON_START} … ${PLAN_JSON_END} with summary, findings, scope, outOfScope, risks, and steps (title like "Epic: …" or "Story: …").`,
-  },
-  {
-    id: APPROVE_COLUMN_ID,
-    name: "Approve",
-    label: "Sign-off",
-    role: "approve",
-    rail: "gate",
-    enabled: true,
-  },
-  {
-    id: FILE_JIRA_COLUMN_ID,
-    name: "File in Jira",
-    label: "File",
-    role: "prompt",
-    rail: "run",
-    enabled: true,
-    promptTemplate:
-      "Create Jira issues from the approved plan only. Honor epic/story hierarchy. Do not invent extra scope.",
-  },
-  {
-    id: DONE_COLUMN_ID,
-    name: "Done",
-    label: "Done",
-    role: "terminal",
-    rail: "gate",
-    enabled: true,
-    locked: true,
-  },
-  {
-    id: BLOCKED_COLUMN_ID,
-    name: "Blocked",
-    label: "Blocked",
-    role: "terminal",
-    rail: "blocked",
-    enabled: true,
-    locked: true,
-  },
-];
+/** Discovery board. Source of truth: flows/discovery.flow.json — no extra locked columns. */
+export const COLUMNS: WorkflowColumn[] = columnsFromFlowSpec(discoveryFlowJson as FlowSpec);
 
 export function columnById(
   id: string,
@@ -231,35 +117,30 @@ export function nextColumnId(
   columnId: string,
   columns: WorkflowColumn[] = COLUMNS,
 ): string | null {
-  if (columnId === BLOCKED_COLUMN_ID) return null;
-  const pipeline = columns.filter((c) => c.id !== BLOCKED_COLUMN_ID);
-  const i = pipeline.findIndex((c) => c.id === columnId);
+  const i = columns.findIndex((c) => c.id === columnId);
   if (i < 0) return null;
-  for (let j = i + 1; j < pipeline.length; j++) {
-    const col = pipeline[j];
-    if (col && (col.enabled || col.id === DONE_COLUMN_ID)) return col.id;
+  for (let j = i + 1; j < columns.length; j++) {
+    const col = columns[j];
+    if (col?.enabled) return col.id;
   }
-  return pipeline.some((c) => c.id === DONE_COLUMN_ID) ? DONE_COLUMN_ID : null;
+  return null;
 }
 
-export const PIPELINE_IDS = COLUMNS.filter((c) => c.id !== BLOCKED_COLUMN_ID).map(
-  (c) => c.id,
-);
-
-const OUTPUT_KEYS: Record<string, string> = {
-  [IDEATION_COLUMN_ID]: "brief",
-  [PREP_AGENDA_COLUMN_ID]: "agenda",
-  [SEND_SLACK_COLUMN_ID]: "slack_post",
-  [TRANSCRIPT_COLUMN_ID]: "transcript",
-  [SYNTHESIZE_COLUMN_ID]: "spec",
-  [FRY_COLUMN_ID]: "grill",
-  [WRITE_PLAN_COLUMN_ID]: "plan",
-  [FILE_JIRA_COLUMN_ID]: "jira",
-};
-
-for (const col of COLUMNS) {
-  if (!col.outputKey && OUTPUT_KEYS[col.id]) col.outputKey = OUTPUT_KEYS[col.id];
+/** Previous enabled stage — review gates edit this stage's output. */
+export function previousColumn(
+  columnId: string,
+  columns: WorkflowColumn[] = COLUMNS,
+): WorkflowColumn | undefined {
+  const i = columns.findIndex((c) => c.id === columnId);
+  if (i < 0) return undefined;
+  for (let j = i - 1; j >= 0; j--) {
+    const col = columns[j];
+    if (col?.enabled) return col;
+  }
+  return undefined;
 }
+
+export const PIPELINE_IDS = COLUMNS.map((c) => c.id);
 
 export const DISCOVERY_FLOW_ID = "flow-discovery";
 export const QUICK_SPEC_FLOW_ID = "flow-quick-spec";

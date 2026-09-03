@@ -1,23 +1,36 @@
 import type { AgentKind, AgentRates, PricingConfig, TokenUsage } from "./types";
 
 /** Anthropic list prices (Aug 2026): Sonnet 5 $2/$10, Haiku 4.5 $1/$5 per million tokens. */
+const WEBLLM_RATES: AgentRates = { inputUsdPerMTok: 0, outputUsdPerMTok: 0 };
+
 export const DEFAULT_PRICING: PricingConfig = {
   charsPerToken: 4,
   claude: { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
   cursor: { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
   studio: { inputUsdPerMTok: 2, outputUsdPerMTok: 10 },
   cis: { inputUsdPerMTok: 1, outputUsdPerMTok: 5 },
+  webllm: { ...WEBLLM_RATES },
 };
 
 export function mergePricing(saved?: Partial<PricingConfig> | null): PricingConfig {
   const d = DEFAULT_PRICING;
-  if (!saved) return { ...d, claude: { ...d.claude }, cursor: { ...d.cursor }, studio: { ...d.studio }, cis: { ...d.cis } };
+  if (!saved) {
+    return {
+      ...d,
+      claude: { ...d.claude },
+      cursor: { ...d.cursor },
+      studio: { ...d.studio },
+      cis: { ...d.cis },
+      webllm: { ...WEBLLM_RATES },
+    };
+  }
   return {
     charsPerToken: Number(saved.charsPerToken) > 0 ? Number(saved.charsPerToken) : d.charsPerToken,
     claude: mergeRates(d.claude, saved.claude),
     cursor: mergeRates(d.cursor, saved.cursor),
     studio: mergeRates(d.studio, saved.studio),
     cis: mergeRates(d.cis, saved.cis),
+    webllm: mergeRates(WEBLLM_RATES, saved.webllm),
   };
 }
 
@@ -37,6 +50,7 @@ export function ratesFor(kind: AgentKind, pricing: PricingConfig): AgentRates {
   if (kind === "claude") return pricing.claude;
   if (kind === "studio") return pricing.studio;
   if (kind === "cis") return pricing.cis;
+  if (kind === "webllm") return pricing.webllm ?? WEBLLM_RATES;
   return pricing.cursor;
 }
 

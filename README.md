@@ -92,7 +92,7 @@ Then restart `npm run dev` **from that Terminal**, Test Cursor and Test Claude, 
 
 A workspace can run **multiple flows**. Switch them in the header or Settings → Flows. Tickets stay on the flow they were created in.
 
-**Discovery prompt source of truth:** [`flows/discovery.flow.json`](flows/discovery.flow.json) — edit stage `prompt.system` / `prompt.user` there. Full variable catalog: [`flows/README.md`](flows/README.md). Loader: `src/lib/flow-spec.ts`.
+**Discovery source of truth:** [`flows/discovery.flow.json`](flows/discovery.flow.json) — stage list, agents, and `prompt.system` / `prompt.user`. Settings → Pipeline / Prompts edits are session-only and wiped on reload; keep changes in that JSON. Full variable catalog: [`flows/README.md`](flows/README.md). Loader: `src/lib/flow-spec.ts`.
 
 Each stage publishes a named value. Later prompts interpolate it **only when the token appears in the stage prompt**:
 
@@ -115,14 +115,7 @@ With **Keep running agent stages** on, a successful run skips review gates and s
 
 ## Per-stage agents
 
-**Settings → Pipeline** pins the agent on each runnable stage. **Inherit** uses the workspace default.
-
-| Stage | Default agent |
-| --- | --- |
-| Agenda, Notify, Backlog | Cursor |
-| Spec | GenAI Studio |
-| Grill | Claude |
-| Everything else | Inherit |
+**Settings → Pipeline** pins the agent on each runnable stage for this session only. **Inherit** uses the workspace default. Boot-time defaults come from the flow JSON.
 
 Discovery **continues into Quick spec** when a ticket hits Done (Settings → Flows). Vars travel with the ticket. Spec on Quick spec is Studio again, with the same `{{brief}}` `{{spec}}` `{{grill}}`.
 

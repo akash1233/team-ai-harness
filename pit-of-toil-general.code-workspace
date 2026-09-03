@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../pit-of-toil-general"
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../slack-mcp"
+		}
+	],
+	"settings": {}
+}

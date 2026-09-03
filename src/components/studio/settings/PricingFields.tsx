@@ -26,7 +26,7 @@ export function PricingFields({
     <section className="flex flex-col gap-3 rounded-md border border-border p-3">
       <h3 className="text-sm font-medium">Token pricing (USD / million tokens)</h3>
       <p className="text-2xs text-muted">
-        Used for the $ on tickets. HTTP/Studio/CIS use the usage object when the API returns it. Local CLI estimates tokens as characters ÷ chars-per-token. Defaults match Anthropic list prices (Aug 2026): Sonnet 5 $2 / $10, Haiku 4.5 $1 / $5.
+        Used for the $ on tickets. HTTP/Studio/CIS use the usage object when the API returns it. Local CLI estimates tokens as characters ÷ chars-per-token. WebLLM is $0 (in-browser). Defaults match Anthropic list prices (Aug 2026): Sonnet 5 $2 / $10, Haiku 4.5 $1 / $5.
       </p>
       <Field label="Characters per estimated token">
         <Input

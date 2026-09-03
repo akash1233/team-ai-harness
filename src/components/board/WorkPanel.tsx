@@ -5,11 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { columnById } from "@/lib/columns";
-import { buildContext, outputVarName } from "@/lib/flow-context";
+import { buildContext, outputVarName, reviewSourceText } from "@/lib/flow-context";
 import { flowStageMentionedKeys, getFlowStage } from "@/lib/flow-spec";
 import { formatSpend } from "@/lib/format";
 import { isManualStep, resolveStep } from "@/lib/agents";
-import { formatGrillRecord } from "@/lib/grill";
+import { stagePurpose } from "@/lib/stage-purpose";
 import { GrillRoom } from "@/components/studio/GrillRoom";
 import { RunLog } from "@/components/studio/RunLog";
 import { PayloadEditor, useStagePayload } from "@/components/studio/PayloadEditor";
@@ -31,16 +31,13 @@ export function WorkPanel() {
       <div className="flex items-start gap-2 border-b border-border px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="font-mono text-micro text-subtle">{ticket.key}</p>
-          <h2 className="font-serif text-lg font-medium leading-snug tracking-tight">{ticket.title}</h2>
-          <p className="mt-1 text-micro uppercase tracking-wider text-muted">
-            {col?.name ?? ticket.columnId}
-            {config.showSpend ? (
-              <>
-                {" · "}
-                <span className="font-mono tabular-nums normal-case tracking-normal">{formatSpend(ticket.spend)}</span>
-              </>
-            ) : null}
-          </p>
+          <h2 className="font-serif text-lg font-medium leading-snug tracking-tight">
+            {col?.label || col?.name || "Stage"}
+          </h2>
+          <p className="mt-1 text-sm text-muted">{col ? stagePurpose(col) : ""}</p>
+          {config.showSpend ? (
+            <p className="mt-1 font-mono text-micro tabular-nums text-subtle">{formatSpend(ticket.spend)}</p>
+          ) : null}
         </div>
         <button
           type="button"
@@ -53,7 +50,7 @@ export function WorkPanel() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {ticket.columnId !== "ideation" && ticket.description ? (
-          <p className="mb-4 text-sm leading-relaxed text-muted">{ticket.description}</p>
+          <p className="mb-4 text-2xs leading-relaxed text-subtle">{ticket.description}</p>
         ) : null}
         {ticket.status === "blocked" && ticket.blockedReason ? (
           <pre className="mb-4 overflow-auto whitespace-pre-wrap rounded-md border border-danger/50 bg-danger/5 p-3 font-mono text-2xs text-danger">
@@ -229,20 +226,15 @@ function StepBody({ ticket }: { ticket: Ticket }) {
   if (col.role === "collect-input" && col.id === "ideation") return <IdeationForm ticket={ticket} />;
   if (col.role === "collect-input" && col.id === "transcript") return <TranscriptForm ticket={ticket} />;
   if (isManualStep(col)) return <ManualCaptureForm ticket={ticket} col={col} />;
-  if (col.role === "review" || col.role === "approve") return <ReviewForm ticket={ticket} />;
+  if (col.role === "review" || col.role === "approve") {
+    return <ReviewForm key={`${ticket.id}:${ticket.columnId}`} ticket={ticket} />;
+  }
   if (col.id === "fry") return <GrillRoom ticket={ticket} />;
   if (col.id === "write-plan") return <PlanForm ticket={ticket} />;
   if (col.id === "file-jira") return <JiraForm ticket={ticket} />;
   if (col.role === "prompt" || col.role === "plan") return <RunForm ticket={ticket} />;
-  if (col.id === "done") {
-    return <DoneForm ticket={ticket} />;
-  }
-  if (col.id === "blocked") {
-    return (
-      <div className="rounded-md border border-danger/40 bg-inset p-3 text-sm text-danger">
-        {ticket.blockedReason || "Blocked"}
-      </div>
-    );
+  if (col.role === "terminal") {
+    return col.id === "done" ? <DoneForm ticket={ticket} /> : null;
   }
   return <RunForm ticket={ticket} />;
 }
@@ -433,36 +425,29 @@ function ReviewForm({ ticket }: { ticket: Ticket }) {
   const approve = useBoardStore((s) => s.approve);
   const columns = useBoardStore((s) => s.config.columns);
   const col = columnById(ticket.columnId, columns);
-  const sourceId =
-    col?.id === "preview-agenda"
-      ? "prep-agenda"
-      : col?.id === "preview-synthesize"
-        ? "synthesize"
-        : col?.id === "preview-fry"
-          ? "fry"
-          : col?.id === "approve"
-            ? "write-plan"
-            : ticket.columnId;
-  const body =
-    col?.id === "preview-fry"
-      ? formatGrillRecord(ticket) || ticket.outputs.fry || ""
-      : ticket.outputs[sourceId] || ticket.outputs[ticket.columnId] || "";
+  const initial = reviewSourceText(ticket, col, columns);
+  const [body, setBody] = useState(initial);
+  const showPlan = col?.role === "approve" && Boolean(ticket.plan);
 
   return (
     <div className="flex flex-col gap-3">
-      {col?.id === "approve" && ticket.plan ? (
-        <PlanPreview ticket={ticket} />
-      ) : (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed text-fg">
-          {body || "Nothing to preview yet."}
-        </pre>
-      )}
+      <p className="text-sm text-muted">
+        Edit the previous stage output if needed, then Approve to continue. This stage does not run an agent.
+      </p>
+      {showPlan ? <PlanPreview ticket={ticket} /> : null}
+      <Textarea
+        className="min-h-48"
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Nothing to review yet — complete the previous stage first."
+      />
       <Button
         variant="primary"
         size="md"
         className="w-full"
+        disabled={!body.trim()}
         onClick={() => {
-          approve(ticket.id);
+          approve(ticket.id, body);
           toast.success("Moved to the next stage");
         }}
       >
@@ -482,6 +467,7 @@ function RunForm({ ticket }: { ticket: Ticket }) {
   const stage = getFlowStage(ticket.columnId);
   const busy = ticket.status === "executing";
   const hasOutput = Boolean(ticket.outputs[ticket.columnId]);
+  const streaming = busy && !ticket.sessionDir && Boolean(ticket.liveLog);
   const payload = useStagePayload(ticket);
   const promptPreview = stage?.prompt?.user?.slice(0, 280) || col?.promptTemplate || "";
   return (
@@ -505,6 +491,10 @@ function RunForm({ ticket }: { ticket: Ticket }) {
             Done — harvest &amp; continue
           </Button>
         </>
+      ) : streaming ? (
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
+          {ticket.liveLog}
+        </pre>
       ) : hasOutput ? (
         <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
           {ticket.outputs[ticket.columnId]}

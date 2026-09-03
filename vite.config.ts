@@ -30,6 +30,64 @@ function hasGlobbedMigrations(root: string): boolean {
  * migrations — no schema to apply — skips it entirely rather than paying for a
  * PGLite instance it never queries.
  */
+/** Browser WebLLM logs → `npm run dev` stdout. */
+/** New id each `vite` process so session pipeline edits die on real boot, not on refresh. */
+function kindlingBootPlugin(): Plugin {
+  const bootId = `boot-${Date.now()}`;
+  return {
+    name: "kindling-boot-id",
+    config() {
+      return {
+        define: {
+          "import.meta.env.VITE_KINDLING_BOOT_ID": JSON.stringify(bootId),
+        },
+      };
+    },
+  };
+}
+
+function kindlingLogPlugin(): Plugin {
+  return {
+    name: "kindling-dev-log",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const pathOnly = (req.url ?? "").split("?", 1)[0] ?? "";
+        if (pathOnly !== "/__kindling/log" || (req.method ?? "GET").toUpperCase() !== "POST") {
+          next();
+          return;
+        }
+        const chunks: Buffer[] = [];
+        req.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        req.on("end", () => {
+          try {
+            const raw = Buffer.concat(chunks);
+            if (raw.length > 16_384) {
+              res.statusCode = 204;
+              res.end();
+              return;
+            }
+            const parsed = JSON.parse(raw.toString("utf8")) as { lines?: unknown };
+            const lines = Array.isArray(parsed.lines) ? parsed.lines.slice(0, 20) : [];
+            for (const line of lines) {
+              if (typeof line !== "string") continue;
+              const one = line.trim().split("\n")[0] ?? "";
+              if (!one.startsWith("[kindling]")) continue;
+              process.stdout.write(`${one.length > 400 ? `${one.slice(0, 400)}…` : one}\n`);
+            }
+          } catch {
+            /* ignore malformed */
+          }
+          res.statusCode = 204;
+          res.end();
+        });
+      });
+    },
+  };
+}
+
 function pgliteBootstrapPlugin(): Plugin {
   return {
     name: "app-builder:pglite-bootstrap",
@@ -157,7 +215,12 @@ export default defineConfig(({ command, isPreview }) => ({
     strictPort: true,
   },
   resolve: { tsconfigPaths: true },
+  optimizeDeps: {
+    exclude: ["@mlc-ai/web-llm"],
+  },
   plugins: [
+    kindlingBootPlugin(),
+    kindlingLogPlugin(),
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),

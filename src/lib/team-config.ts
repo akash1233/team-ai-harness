@@ -1,24 +1,22 @@
 import {
   APPROVE_COLUMN_ID,
-  BLOCKED_COLUMN_ID,
   cloneColumns,
   DISCOVERY_FLOW_ID,
   DONE_COLUMN_ID,
   FILE_JIRA_COLUMN_ID,
   FRY_COLUMN_ID,
   IDEATION_COLUMN_ID,
-  NOTIFY_PROMPT_TEMPLATE,
   PREVIEW_FRY_COLUMN_ID,
   QUICK_SPEC_FLOW_ID,
-  SEND_SLACK_COLUMN_ID,
   SYNTHESIZE_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
 } from "./columns.ts";
 import { mergePricing } from "./pricing.ts";
-import { createDefaultPrompts, flowStagePromptBody, mergePrompts, stampPromptRefs } from "./prompts.ts";
+import { createDefaultPrompts, stampPromptRefs } from "./prompts.ts";
 import { createDefaultConnectors, mergeConnectors } from "./connectors.ts";
 import { legacyDefaultAgent } from "./agents.ts";
 import { DEFAULT_DOCS } from "./grill-skill.ts";
+import { isWebllmProfile, normalizeWebllmModelIds } from "./webllm.ts";
 import type { ExecutionConfig, Flow, TeamConfig, TeamDoc, TeamMember, WorkflowColumn } from "./types.ts";
 
 export { executionLabel } from "./agents.ts";
@@ -38,7 +36,7 @@ export function createDiscoveryFlow(): Flow {
   return {
     id: DISCOVERY_FLOW_ID,
     name: "Discovery",
-    description: "Brief → agenda (Cursor) → notes → spec (Studio) → Grill Me → backlog (Cursor) → Jira.",
+    description: "Brief → agenda (WebLLM) → notes → spec (WebLLM) → Grill Me → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns()),
     autoAdvance: true,
     autoRun: false,
@@ -50,7 +48,7 @@ export function createQuickSpecFlow(): Flow {
   return {
     id: QUICK_SPEC_FLOW_ID,
     name: "Quick spec",
-    description: "Skip agenda and Slack. Brief → spec (Studio) → grill → backlog (Cursor) → Jira.",
+    description: "Skip agenda and Slack. Brief → spec (WebLLM) → grill → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns([
       IDEATION_COLUMN_ID,
       SYNTHESIZE_COLUMN_ID,
@@ -60,7 +58,6 @@ export function createQuickSpecFlow(): Flow {
       APPROVE_COLUMN_ID,
       FILE_JIRA_COLUMN_ID,
       DONE_COLUMN_ID,
-      BLOCKED_COLUMN_ID,
     ])),
     autoAdvance: true,
     autoRun: false,
@@ -76,7 +73,7 @@ export function createDefaultExecution(): ExecutionConfig {
     defaultAgent: "cursor",
     cursorTarget: "local",
     claudeTarget: "local",
-    cursorCommand: "agent -p --output-format text",
+    cursorCommand: "cursor-agent -p --output-format text",
     claudeCommand: "claude -p --output-format text",
     localHttpUrl: "",
     cursorRemoteUrl: "",
@@ -98,6 +95,9 @@ export function createDefaultExecution(): ExecutionConfig {
     claudeExtraArgs: "--permission-mode default",
     runInTerminal: true,
     fullAgentMode: false,
+    webllmProfile: "balanced",
+    webllmModelId: "",
+    webllmExtraModelIds: [],
     provider: "local",
     localAgent: "cursor",
   };
@@ -129,26 +129,9 @@ export function createDefaultTeam(): TeamConfig {
   };
 }
 
-export function mergeColumns(saved?: WorkflowColumn[]): WorkflowColumn[] {
-  const defaults = createDefaultColumns();
-  if (!saved?.length) return defaults;
-  return saved.map((col) => {
-    const base = defaults.find((d) => d.id === col.id);
-    const merged: WorkflowColumn = {
-      ...base,
-      ...col,
-      agent: col.agent ?? base?.agent ?? (col.role === "collect-input" ? "manual" : "inherit"),
-      outputKey: col.outputKey ?? base?.outputKey,
-      promptRef: col.promptRef ?? base?.promptRef,
-    };
-    if (col.id === SEND_SLACK_COLUMN_ID) {
-      merged.agent = "cursor";
-      merged.promptTemplate = NOTIFY_PROMPT_TEMPLATE;
-    }
-    const flowBody = flowStagePromptBody(col.id);
-    if (flowBody !== undefined) merged.promptTemplate = flowBody;
-    return merged;
-  });
+/** Boot always rebuilds Discovery from JSON. Session UI column edits are not merged back. */
+export function mergeColumns(_saved?: WorkflowColumn[]): WorkflowColumn[] {
+  return createDefaultColumns();
 }
 
 export function mergeDocs(saved?: TeamDoc[]): TeamDoc[] {
@@ -168,45 +151,14 @@ export function mergeExecution(saved?: Partial<ExecutionConfig>): ExecutionConfi
   const fromLegacy = legacyDefaultAgent(saved);
   if (!saved?.defaultAgent && fromLegacy) merged.defaultAgent = fromLegacy;
   merged.pricing = mergePricing(saved?.pricing);
+  merged.webllmProfile = isWebllmProfile(saved?.webllmProfile) ? saved.webllmProfile : d.webllmProfile;
+  merged.webllmModelId = typeof saved?.webllmModelId === "string" ? saved.webllmModelId : d.webllmModelId;
+  merged.webllmExtraModelIds = normalizeWebllmModelIds(saved?.webllmExtraModelIds ?? d.webllmExtraModelIds);
   return merged;
 }
 
-function mergeFlow(saved: Partial<Flow>, fallback: Flow): Flow {
-  return {
-    ...fallback,
-    ...saved,
-    id: saved.id || fallback.id,
-    name: saved.name || fallback.name,
-    description: saved.description ?? fallback.description,
-    columns: saved.columns?.length ? mergeColumns(saved.columns) : fallback.columns.map((c) => ({ ...c })),
-    autoAdvance: saved.autoAdvance ?? fallback.autoAdvance,
-    autoRun: saved.autoRun ?? fallback.autoRun,
-    continueInFlowId: saved.continueInFlowId ?? fallback.continueInFlowId,
-  };
-}
-
-export function mergeFlows(saved?: Flow[], legacyColumns?: WorkflowColumn[]): Flow[] {
-  const defaults = createDefaultFlows();
-  if (!saved?.length) {
-    if (legacyColumns?.length) {
-      return [
-        mergeFlow({ id: DISCOVERY_FLOW_ID, name: "Discovery", columns: legacyColumns }, defaults[0]!),
-        defaults[1]!,
-      ];
-    }
-    return defaults;
-  }
-  const byId = new Map(saved.map((f) => [f.id, f]));
-  const merged = defaults.map((d) => {
-    const hit = byId.get(d.id);
-    return hit ? mergeFlow(hit, d) : d;
-  });
-  for (const f of saved) {
-    if (!merged.some((m) => m.id === f.id)) {
-      merged.push(mergeFlow(f, { ...defaults[0]!, id: f.id, name: f.name || "Untitled flow" }));
-    }
-  }
-  return merged;
+export function mergeFlows(_saved?: Flow[], _legacyColumns?: WorkflowColumn[]): Flow[] {
+  return createDefaultFlows();
 }
 
 export function activeFlow(config: TeamConfig): Flow {
@@ -238,10 +190,34 @@ export function patchActiveFlow(config: TeamConfig, patch: Partial<Flow>): TeamC
   return applyActiveFlow(next, config.activeFlowId);
 }
 
+/** Keep in-memory Pipeline / Prompts / Flows edits for the current app process. */
+export function restoreSessionPipeline(saved: Partial<TeamConfig>): TeamConfig {
+  const boot = mergeTeamConfig({ ...saved, flows: undefined, columns: undefined, prompts: undefined });
+  if (!saved.flows?.length && !saved.columns?.length && !saved.prompts?.length) return boot;
+
+  const flows = saved.flows?.length
+    ? saved.flows.map((f) => ({
+        ...f,
+        columns: f.columns?.length ? f.columns.map((c) => ({ ...c })) : boot.columns.map((c) => ({ ...c })),
+      }))
+    : boot.flows.map((f) =>
+        f.id === (saved.activeFlowId ?? boot.activeFlowId) && saved.columns?.length
+          ? { ...f, columns: saved.columns.map((c) => ({ ...c })) }
+          : { ...f, columns: f.columns.map((c) => ({ ...c })) },
+      );
+  const activeFlowId =
+    saved.activeFlowId && flows.some((f) => f.id === saved.activeFlowId) ? saved.activeFlowId : flows[0]!.id;
+  const columns = (flows.find((f) => f.id === activeFlowId)?.columns ?? saved.columns ?? boot.columns).map((c) => ({
+    ...c,
+  }));
+  const prompts = saved.prompts?.length ? saved.prompts.map((p) => ({ ...p })) : createDefaultPrompts(columns);
+  return applyActiveFlow({ ...boot, flows, columns, prompts, activeFlowId }, activeFlowId);
+}
+
 export function mergeTeamConfig(saved?: Partial<TeamConfig>): TeamConfig {
   const d = createDefaultTeam();
   if (!saved) return d;
-  const flows = mergeFlows(saved.flows, saved.columns);
+  const flows = createDefaultFlows();
   const activeFlowId =
     saved.activeFlowId && flows.some((f) => f.id === saved.activeFlowId) ? saved.activeFlowId : flows[0]!.id;
   const activeColumns = flows.find((f) => f.id === activeFlowId)?.columns ?? d.columns;
@@ -250,7 +226,7 @@ export function mergeTeamConfig(saved?: Partial<TeamConfig>): TeamConfig {
     ...saved,
     members: saved.members?.length ? saved.members : d.members,
     docs: mergeDocs(saved.docs),
-    prompts: mergePrompts(saved.prompts, activeColumns),
+    prompts: createDefaultPrompts(activeColumns),
     execution: mergeExecution(saved.execution),
     connectors: mergeConnectors(saved.connectors),
     flows,

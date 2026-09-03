@@ -12,6 +12,8 @@ import { TicketList } from "./TicketList";
 import { PipelineBoard } from "./PipelineBoard";
 import { TeamSettings } from "./TeamSettings";
 import { StageSessionWatcher } from "./StageSessionWatcher";
+import { WebllmStatusBar } from "./WebllmStatusBar";
+import { ensureLogFlush } from "@/lib/logger-flush";
 
 export function Studio() {
   const hydrate = useBoardStore((s) => s.hydrate);
@@ -32,6 +34,10 @@ export function Studio() {
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    ensureLogFlush();
+  }, []);
 
   useEffect(() => {
     const ids = config.columns.map((c) => c.id);
@@ -113,6 +119,7 @@ export function Studio() {
           </Button>
         </div>
       </header>
+      <WebllmStatusBar />
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         {config.pipelineLayout === "horizontal" ? (

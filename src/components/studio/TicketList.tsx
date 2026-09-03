@@ -106,11 +106,12 @@ function TicketCard({
   const last = ticket.agentResponses.find((r) => r.columnId === stageId) ?? ticket.agentResponses[0];
   const writes = outputVarName(config.columns.find((c) => c.id === stageId));
   const output =
-    (writes && ticket.vars?.[writes]) ||
-    ticket.outputs[stageId] ||
-    last?.body ||
-    ticket.liveLog ||
-    "";
+    ticket.status === "executing"
+      ? ""
+      : (writes && ticket.vars?.[writes]) ||
+        ticket.outputs[stageId] ||
+        last?.body ||
+        "";
   const vars = Object.entries(ticket.vars ?? {}).filter(([, v]) => v.trim());
   const error = ticket.blockedReason || (last?.ok === false ? last.error || last.body : "");
 

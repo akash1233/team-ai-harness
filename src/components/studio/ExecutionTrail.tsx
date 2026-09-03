@@ -70,15 +70,15 @@ export function ExecutionTrail({
       </div>
       {live.length > 0 ? (
         <div>
-          <h2 className="font-serif text-lg font-medium tracking-tight">Live log</h2>
-          {live.map((t) => (
-            <pre
-              key={t.id}
-              className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-mono text-2xs text-muted"
-            >
-              {t.liveLog}
-            </pre>
-          ))}
+          <h2 className="font-serif text-lg font-medium tracking-tight">In progress</h2>
+          <ul className="mt-2 flex flex-col gap-1">
+            {live.map((t) => (
+              <li key={t.id} className="text-sm text-muted">
+                {t.key}
+                {t.liveLog ? ` · ${t.liveLog.split("\n")[0]}` : ""}
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
       <div>

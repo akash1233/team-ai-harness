@@ -36,12 +36,14 @@ function ticket(over: Partial<Ticket> = {}): Ticket {
   };
 }
 
-test("Discovery agents: agenda Cursor, spec Studio, plan Cursor", () => {
+test("Discovery agents: agenda WebLLM, spec WebLLM, plan Cursor", () => {
   const agenda = COLUMNS.find((c) => c.id === PREP_AGENDA_COLUMN_ID);
   const spec = COLUMNS.find((c) => c.id === SYNTHESIZE_COLUMN_ID);
   const plan = COLUMNS.find((c) => c.id === WRITE_PLAN_COLUMN_ID);
-  assert.equal(agenda?.agent, "cursor");
-  assert.equal(spec?.agent, "studio");
+  assert.equal(agenda?.agent, "webllm");
+  assert.equal(agenda?.webllmProfile, "fast");
+  assert.equal(spec?.agent, "webllm");
+  assert.equal(spec?.webllmProfile, "quality");
   assert.equal(plan?.agent, "cursor");
 });
 

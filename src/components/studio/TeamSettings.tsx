@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { cn } from "@/lib/cn";
-import type { AgentKind, AgentTarget, ColumnRole, DensityId, PipelineLayout, StepAgent, ThemeId } from "@/lib/types";
+import type { AgentKind, AgentTarget, ColumnRole, DensityId, PipelineLayout, StepAgent, ThemeId, WebllmProfile } from "@/lib/types";
 import { createDefaultExecution, executionLabel } from "@/lib/team-config";
-import { AGENT_KINDS } from "@/lib/agents";
-import { testExecution } from "@/lib/discovery-agent";
+import { AGENT_KINDS, resolveStep } from "@/lib/agents";
+import { WEBLLM_PROFILES, stageUsesWebllm } from "@/lib/webllm";
+import { WebllmFields } from "@/components/studio/settings/WebllmFields";
+import { inspectCliBins, readAppLogs, testExecution } from "@/lib/discovery-agent";
+import { getLogLevel, getLogLines, subscribeLogs } from "@/lib/logger";
 import { Field, Code } from "@/components/studio/settings/field";
 import { PricingFields } from "@/components/studio/settings/PricingFields";
 import { mergePricing } from "@/lib/pricing";
@@ -18,7 +21,7 @@ import { bindJiraKey, unbindJiraKey } from "@/lib/prompts";
 import { SEND_SLACK_COLUMN_ID } from "@/lib/columns";
 import { FlowSpecWarning } from "@/components/studio/FlowSpecWarning";
 
-const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Skills", "Connect", "Execution", "Look"] as const;
+const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Skills", "Connect", "WebLLM", "Execution", "Look"] as const;
 type Tab = (typeof TABS)[number];
 
 const ROLE_LABEL: Record<ColumnRole, string> = {
@@ -38,12 +41,14 @@ const STEP_AGENTS: { id: StepAgent; label: string }[] = [
   { id: "claude", label: "Claude" },
   { id: "studio", label: "Studio" },
   { id: "cis", label: "CIS" },
+  { id: "webllm", label: "WebLLM" },
 ];
 const KIND_LABEL: Record<AgentKind, string> = {
   cursor: "Cursor",
   claude: "Claude",
   studio: "GenAI Studio",
   cis: "CIS",
+  webllm: "WebLLM",
 };
 
 export function TeamSettings() {
@@ -95,6 +100,7 @@ export function TeamSettings() {
           {tab === "Prompts" ? <PromptsTab focusId={focusPromptId} onFocus={setFocusPromptId} /> : null}
           {tab === "Skills" ? <DocsTab /> : null}
           {tab === "Connect" ? <ConnectTab /> : null}
+          {tab === "WebLLM" ? <WebllmTab /> : null}
           {tab === "Execution" ? <ExecutionTab /> : null}
           {tab === "Look" ? <LookTab /> : null}
         </div>
@@ -410,6 +416,7 @@ function FlowsTab() {
 function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
   const columns = useBoardStore((s) => s.config.columns);
   const prompts = useBoardStore((s) => s.config.prompts) ?? [];
+  const execution = useBoardStore((s) => s.config.execution);
   const updateColumn = useBoardStore((s) => s.updateColumn);
   const moveColumn = useBoardStore((s) => s.moveColumn);
   const addColumn = useBoardStore((s) => s.addColumn);
@@ -420,7 +427,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
     <div className="flex flex-col gap-3">
       <div className="rounded-md border border-border bg-inset px-3 py-2 text-sm text-muted">
         <p>
-          This tab only <strong className="font-medium text-fg">designs</strong> the flow. Run it on the board. Suggested: 01 Team types this → variable <span className="font-mono">brief</span>. 02 Agent runs Cursor, prompt uses <span className="font-mono">{"{{brief}}"}</span>, variable <span className="font-mono">agenda</span>. 03 Agent prompt is “print {"{{agenda}}"} exactly” so you can see the handoff. The variable is the last agent reply only — no logs.
+          This tab only <strong className="font-medium text-fg">designs</strong> the flow. Run it on the board. Pin <strong className="font-medium text-fg">Who runs it</strong> to Cursor, Claude, Studio, CIS, or WebLLM. WebLLM stages also get a performance picker (Fast / Balanced / Quality). Notify stays on Cursor. The variable is the last agent reply only — no logs.
         </p>
       </div>
       <ul className="flex flex-col gap-2">
@@ -459,13 +466,37 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                   value={col.agent ?? "inherit"}
                   onChange={(e) => updateColumn(col.id, { agent: e.target.value as StepAgent })}
                 >
-                  {STEP_AGENTS.map((a) => (
+                  {(col.id === SEND_SLACK_COLUMN_ID
+                    ? STEP_AGENTS.filter((a) => a.id !== "webllm")
+                    : STEP_AGENTS
+                  ).map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.label}
                     </option>
                   ))}
                 </select>
               </label>
+              {stageUsesWebllm(col, execution) ? (
+                <label className="flex flex-col gap-1">
+                  <span className="text-micro text-subtle">WebLLM performance</span>
+                  <select
+                    className="h-11 rounded-md border border-border bg-inset px-2 text-sm"
+                    value={col.webllmProfile ?? ""}
+                    onChange={(e) =>
+                      updateColumn(col.id, {
+                        webllmProfile: (e.target.value || undefined) as WebllmProfile | undefined,
+                      })
+                    }
+                  >
+                    <option value="">Workspace default ({execution.webllmProfile ?? "balanced"})</option>
+                    {WEBLLM_PROFILES.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label} — {p.summary}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               {col.role === "prompt" || col.role === "plan" || col.role === "collect-input" ? (
                 <label className="flex min-w-40 flex-1 flex-col gap-1">
                   <span className="text-micro text-subtle">Prompt</span>
@@ -906,6 +937,208 @@ function DocsTab() {
   );
 }
 
+type CliRow = {
+  configured: string;
+  path: string | null;
+  realPath: string | null;
+  version: string;
+  identity: string;
+};
+
+function identityLabel(id: string): string {
+  if (id === "cursor") return "Cursor CLI";
+  if (id === "grok") return "Grok (not used for Notify)";
+  if (id === "claude") return "Claude CLI";
+  if (id === "missing") return "not found";
+  return id;
+}
+
+function mergeLogLines(server: string[], client: string[]): string[] {
+  return [...new Set([...server, ...client])].sort();
+}
+
+function AppConsoleLog({
+  probe,
+  busy,
+}: {
+  probe: {
+    ok: boolean;
+    via: string;
+    text: string;
+    error?: string;
+    checks?: { ok: boolean; label: string; detail: string }[];
+    log?: string;
+  } | null;
+  busy: string | null;
+}) {
+  const appConsole = useBoardStore((s) => s.appConsole);
+  const [serverLines, setServerLines] = useState<string[]>([]);
+  const [clientLines, setClientLines] = useState<string[]>(() => getLogLines());
+  const [level, setLevel] = useState(getLogLevel());
+  const [preEl, setPreEl] = useState<HTMLPreElement | null>(null);
+
+  useEffect(() => {
+    let stop = false;
+    async function tick() {
+      try {
+        const report = await readAppLogs({ data: {} });
+        if (!stop) {
+          setServerLines(report.lines);
+          setClientLines(getLogLines());
+          setLevel(report.level);
+        }
+      } catch {
+        if (!stop) {
+          setClientLines(getLogLines());
+          setLevel(getLogLevel());
+        }
+      }
+    }
+    void tick();
+    const id = setInterval(() => void tick(), 500);
+    const unsub = subscribeLogs((rec) => {
+      setClientLines((prev) => (prev.includes(rec.line) ? prev : [...prev, rec.line]));
+    });
+    return () => {
+      stop = true;
+      clearInterval(id);
+      unsub();
+    };
+  }, []);
+
+  const lines = mergeLogLines(serverLines, [...clientLines, ...appConsole]);
+  const live = probe?.log || probe?.error || "";
+  const body = [
+    lines.length ? lines.join("\n") : "",
+    live ? `${lines.length ? "\n--- live test ---\n" : ""}${live}` : "",
+  ]
+    .filter(Boolean)
+    .join("");
+
+  useEffect(() => {
+    if (preEl) preEl.scrollTop = preEl.scrollHeight;
+  }, [preEl, body]);
+
+  return (
+    <section
+      className={cn(
+        "flex flex-col gap-2 rounded-md border p-3",
+        probe && !probe.ok ? "border-danger" : "border-border",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">App log</h3>
+        <span className="text-2xs text-muted">
+          {probe
+            ? busy
+              ? probe.text
+              : probe.ok
+                ? `Pass · ${probe.via}`
+                : `Fail · ${probe.via}`
+            : null}
+          {probe ? " · " : null}
+          <span className="font-mono">PIT_LOG_LEVEL={level}</span>
+        </span>
+      </div>
+      <p className="text-2xs text-muted">
+        Every execution call (Cursor, Claude, HTTP, WebLLM, tests) writes here.{" "}
+        <span className="font-mono">debug</span> includes info, warn, and error. Set{" "}
+        <span className="font-mono">PIT_LOG_LEVEL</span> in <span className="font-mono">.env</span>, then restart{" "}
+        <span className="font-mono">npm run dev</span>.
+      </p>
+      {probe?.checks?.length ? (
+        <ul className="flex flex-col gap-1">
+          {probe.checks.map((c) => (
+            <li key={c.label} className="text-2xs">
+              <span className={cn("font-medium", c.ok ? "text-fg" : "text-danger")}>
+                {c.ok ? "Pass" : "Fail"} · {c.label}
+              </span>
+              {c.detail && c.detail.length < 200 ? (
+                <span className="text-muted"> — {c.detail.split("\n")[0]}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <pre
+        ref={setPreEl}
+        className="max-h-80 min-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-inset p-3 font-mono text-2xs text-fg"
+      >
+        {body ||
+          "No execution logs yet. Run a stage or Test Cursor.\nYou should see [kindling] INFO exec start, then the CLI path and ok/fail."}
+      </pre>
+      {probe && !probe.ok && /PATH|not on PATH|not on Node PATH/i.test(probe.error || probe.text || "") ? (
+        <p className="text-2xs text-muted">
+          Mac: add <span className="font-mono">~/.local/bin</span> to PATH, restart{" "}
+          <span className="font-mono">npm run dev</span> from Terminal.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function CliBinsPanel({ exec }: { exec: ReturnType<typeof createDefaultExecution> }) {
+  const [rows, setRows] = useState<{ cursor: CliRow; grokOnPath: CliRow | null; claude: CliRow } | null>(null);
+  const [error, setError] = useState("");
+
+  async function load() {
+    setError("");
+    try {
+      const report = await inspectCliBins({ data: { execution: exec } });
+      setRows(report);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not inspect CLIs");
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exec.cursorCommand, exec.claudeCommand]);
+
+  return (
+    <section className="flex flex-col gap-2 rounded-md border border-border p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">Resolved CLIs</h3>
+        <button type="button" className="h-9 rounded-md border border-border px-3 text-2xs" onClick={() => void load()}>
+          Re-detect
+        </button>
+      </div>
+      <p className="text-2xs text-muted">
+        Notify and other Cursor stages use the Cursor row, never Grok’s <span className="font-mono">agent</span> even if it is first on PATH.
+      </p>
+      {error ? <p className="text-2xs text-danger">{error}</p> : null}
+      {rows ? (
+        <ul className="flex flex-col gap-2 font-mono text-2xs">
+          <CliBinLine title="Cursor (Notify uses this)" row={rows.cursor} />
+          {rows.grokOnPath ? <CliBinLine title="Grok on PATH (ignored)" row={rows.grokOnPath} warn /> : null}
+          <CliBinLine title="Claude" row={rows.claude} />
+        </ul>
+      ) : (
+        <p className="text-2xs text-muted">Detecting binaries…</p>
+      )}
+    </section>
+  );
+}
+
+function CliBinLine({ title, row, warn }: { title: string; row: CliRow; warn?: boolean }) {
+  const path = row.path || "—";
+  const real = row.realPath && row.realPath !== row.path ? ` → ${row.realPath}` : "";
+  return (
+    <li className={cn("rounded-md border px-2 py-1.5", warn ? "border-danger/50" : "border-border")}>
+      <p className={cn("font-sans font-medium", warn ? "text-danger" : "text-fg")}>
+        {title} · {identityLabel(row.identity)}
+      </p>
+      <p className="text-muted">cmd: {row.configured}</p>
+      <p className="break-all text-fg">
+        {path}
+        {real}
+      </p>
+      {row.version ? <p className="text-muted">{row.version}</p> : null}
+    </li>
+  );
+}
+
 function MacAgentHints() {
   return (
     <section className="rounded-md border border-border p-3">
@@ -919,8 +1152,7 @@ function MacAgentHints() {
           <Code>curl https://cursor.com/install -fsS | bash</Code>
           <Code>{`echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc`}</Code>
           <p className="mt-1 text-2xs text-muted">
-            Confirm with <span className="font-mono">which agent</span>. If you only have <span className="font-mono">cursor-agent</span>, set Cursor command below to{" "}
-            <span className="font-mono">cursor-agent -p --output-format text</span>.
+            Confirm with <span className="font-mono">cursor-agent --version</span>. Kindling does not use Grok’s <span className="font-mono">agent</span> even if it is first on PATH.
           </p>
         </li>
         <li>
@@ -936,8 +1168,26 @@ function MacAgentHints() {
             Use Test Cursor / Test Claude. You want a path plus a --version line. Uncheck connectivity-only to send a cheap Haiku/Composer ping.
           </p>
         </li>
+        <li>
+          <p className="font-medium">WebLLM (in this tab)</p>
+          <p className="text-2xs text-muted">
+            No CLI. Chrome or Edge with WebGPU. Pick Fast / Balanced / Quality below, then Test WebLLM. First run downloads the model into the browser; later runs are local.
+          </p>
+        </li>
       </ol>
     </section>
+  );
+}
+
+function WebllmTab() {
+  const config = useBoardStore((s) => s.config);
+  const patchConfig = useBoardStore((s) => s.patchConfig);
+  const exec = config.execution ?? createDefaultExecution();
+  return (
+    <WebllmFields
+      exec={exec}
+      onPatch={(partial) => patchConfig({ execution: { ...exec, ...partial } })}
+    />
   );
 }
 
@@ -962,7 +1212,48 @@ function ExecutionTab() {
     patchConfig({ execution: { ...exec, ...partial } });
   }
 
+  async function testWebllm() {
+    setBusy("webllm");
+    setProbe({ ok: true, via: "webllm", text: "Starting…", log: "[kindling] WebLLM" });
+    try {
+      const { probeWebllm } = await import("@/lib/webllm-engine");
+      const result = await probeWebllm({
+        execution: exec,
+        prompt,
+        connectOnly,
+        onLog: (log) =>
+          setProbe({
+            ok: true,
+            via: "webllm",
+            text: "Running…",
+            log,
+          }),
+      });
+      setProbe({
+        ok: result.ok,
+        via: result.via,
+        text: result.ok ? result.text : result.error || "Failed",
+        error: result.error,
+        checks: result.checks,
+        log: result.log,
+      });
+    } catch (err) {
+      setProbe({
+        ok: false,
+        via: "webllm",
+        text: "",
+        error: err instanceof Error ? err.message : "WebLLM test failed",
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function test(stepAgent: StepAgent, extra?: { mcp?: boolean }) {
+    if (resolveStep({ agent: stepAgent }, exec).kind === "webllm") {
+      await testWebllm();
+      return;
+    }
     const label = extra?.mcp ? `${stepAgent}-mcp` : stepAgent;
     setBusy(label);
     setProbe({ ok: true, via: stepAgent, text: "Starting…", log: "[kindling] starting" });
@@ -1041,6 +1332,7 @@ function ExecutionTab() {
       <p className="text-sm text-muted">
         Kindling tests use print mode (<span className="font-mono">-p</span>) so they exit. Pipeline stages open a long Terminal TUI (<span className="font-mono">script -q -F</span>, prompt file, session id / workspace). Answer prompts there; close the window when done.
       </p>
+      <CliBinsPanel exec={exec} />
       <MacAgentHints />
       {exec.demoFallbacks ? (
         <p className="rounded-md border border-border px-3 py-2 text-sm text-muted">
@@ -1053,7 +1345,7 @@ function ExecutionTab() {
         <ol className="list-decimal space-y-1 pl-4 text-2xs text-muted">
           <li>The stage prompt is interpolated from Settings + ticket vars (<span className="font-mono">{"{{brief}}"}</span>, <span className="font-mono">{"{{spec}}"}</span>…).</li>
           <li>Kindling spawns the CLI in your workspace (or opens Terminal.app) with print-mode flags.</li>
-          <li>Stdout is the stage result. That becomes the next stage’s variable. Studio/CIS are HTTP instead of a CLI.</li>
+          <li>Stdout is the stage result. That becomes the next stage’s variable. Studio/CIS are HTTP. WebLLM runs the model in this tab (WebGPU).</li>
         </ol>
         <label className="flex min-h-11 items-center gap-3 text-sm">
           <input
@@ -1123,48 +1415,18 @@ function ExecutionTab() {
           >
             {busy === "inherit" ? "Testing…" : `Test default (${executionLabel(exec)})`}
           </button>
+          <button
+            type="button"
+            disabled={Boolean(busy)}
+            onClick={() => void testWebllm()}
+            className="inline-flex h-11 items-center rounded-md border border-border px-4 text-sm disabled:opacity-40"
+          >
+            {busy === "webllm" ? "Testing…" : "Test WebLLM"}
+          </button>
         </div>
       </section>
 
-      <section
-        className={cn(
-          "flex flex-col gap-2 rounded-md border p-3",
-          probe && !probe.ok ? "border-danger" : "border-border",
-        )}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">App log</h3>
-          {probe ? (
-            <span className={cn("text-2xs", probe.ok ? "text-muted" : "text-danger")}>
-              {busy ? probe.text : probe.ok ? `Pass · ${probe.via}` : `Fail · ${probe.via}`}
-            </span>
-          ) : (
-            <span className="text-2xs text-muted">Run a test to stream command + stdout here</span>
-          )}
-        </div>
-        {probe?.checks?.length ? (
-          <ul className="flex flex-col gap-1">
-            {probe.checks.map((c) => (
-              <li key={c.label} className="text-2xs">
-                <span className={cn("font-medium", c.ok ? "text-fg" : "text-danger")}>
-                  {c.ok ? "Pass" : "Fail"} · {c.label}
-                </span>
-                {c.detail && c.detail.length < 200 ? (
-                  <span className="text-muted"> — {c.detail.split("\n")[0]}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <pre className="max-h-80 min-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-inset p-3 font-mono text-2xs text-fg">
-          {probe?.log || probe?.error || "Waiting for a test…\nYou should see [kindling] start, the exact CLI, then the agent stdout."}
-        </pre>
-        {probe && !probe.ok && /PATH|not on PATH|not on Node PATH/i.test(probe.error || probe.text || "") ? (
-          <p className="text-2xs text-muted">
-            Mac: add <span className="font-mono">~/.local/bin</span> to PATH, restart <span className="font-mono">npm run dev</span> from Terminal.
-          </p>
-        ) : null}
-      </section>
+      <AppConsoleLog probe={probe} busy={busy} />
 
       <section className="flex flex-col gap-3 rounded-md border border-border p-3">
         <h3 className="text-sm font-medium">MCP</h3>
@@ -1203,7 +1465,7 @@ function ExecutionTab() {
 
       <fieldset>
         <legend className="mb-2 text-sm font-medium">Default for Inherit</legend>
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-5">
           {AGENT_KINDS.map((kind) => (
             <button
               key={kind}
@@ -1217,6 +1479,10 @@ function ExecutionTab() {
         </div>
       </fieldset>
 
+      <p className="rounded-md border border-border px-3 py-2 text-2xs text-muted">
+        WebLLM status, cache, and extra models are on the <span className="font-medium text-fg">WebLLM</span> tab.
+      </p>
+
       <section className="flex flex-col gap-3 rounded-md border border-border p-3">
         <h3 className="text-sm font-medium">Cursor</h3>
         <TargetToggle
@@ -1226,6 +1492,10 @@ function ExecutionTab() {
         <Field label="Local command">
           <Input className="font-mono" value={exec.cursorCommand} onChange={(e) => patch({ cursorCommand: e.target.value })} />
         </Field>
+        <p className="-mt-2 text-2xs text-muted">
+          Resolved binary (and whether it is Cursor vs Grok) is in Resolved CLIs at the top of this tab. Prefer{" "}
+          <span className="font-mono">cursor-agent</span> — <span className="font-mono">agent</span> on this Mac is Grok.
+        </p>
         <Field label="Print-mode flags (non-interactive)">
           <Input
             className="font-mono"

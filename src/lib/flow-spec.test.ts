@@ -3,7 +3,9 @@ import { test } from "node:test";
 import {
   clearFlowSpecCache,
   discoveryFlowPath,
+  flowStageAgent,
   flowStageMentionedKeys,
+  flowStageWebllmProfile,
   getFlowStage,
   listFlowVariables,
   loadDiscoveryFlowSpec,
@@ -104,4 +106,26 @@ test("flowStageMentionedKeys lists tokens from JSON prompt", () => {
   const keys = flowStageMentionedKeys(stage);
   assert.ok(keys.includes("brief"));
   assert.ok(keys.includes("jira"));
+});
+
+test("Discovery flow pins Agenda and Spec to WebLLM; Notify stays Cursor", () => {
+  assert.equal(flowStageAgent("prep-agenda"), "webllm");
+  assert.equal(flowStageWebllmProfile("prep-agenda"), "fast");
+  assert.equal(flowStageAgent("synthesize"), "webllm");
+  assert.equal(flowStageWebllmProfile("synthesize"), "quality");
+  assert.equal(flowStageAgent("send-slack"), "cursor");
+  assert.equal(flowStageWebllmProfile("send-slack"), undefined);
+});
+
+test("Spec prompt is a short in-browser synthesis, not a repo-explore skill", () => {
+  const prompt = resolveFlowStagePrompt("synthesize", {
+    ...baseTicket,
+    transcript: "Maya: ship voice on Grill first.",
+  });
+  assert.ok(prompt);
+  assert.match(prompt!.user, /Notes:/);
+  assert.match(prompt!.user, /ship voice on Grill first/);
+  assert.match(prompt!.system, /Spec document only/);
+  assert.doesNotMatch(prompt!.system, /explore the repo/i);
+  assert.doesNotMatch(prompt!.system, /setup-matt-pocock/);
 });

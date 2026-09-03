@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { COLUMNS, FRY_COLUMN_ID, PREP_AGENDA_COLUMN_ID, SEND_SLACK_COLUMN_ID } from "./columns.ts";
+import { COLUMNS, FRY_COLUMN_ID, PREP_AGENDA_COLUMN_ID, SEND_SLACK_COLUMN_ID, SYNTHESIZE_COLUMN_ID } from "./columns.ts";
 import { bindJiraKey, createDefaultPrompts, mergePrompts, resolveStagePrompt, unbindJiraKey } from "./prompts.ts";
 import type { TeamDoc } from "./types.ts";
 
@@ -92,4 +92,24 @@ test("mergeColumns replaces stale column promptTemplate with the flow JSON promp
   const agenda = merged.find((c) => c.id === PREP_AGENDA_COLUMN_ID);
   assert.match(agenda?.promptTemplate ?? "", /Brief \(logistics\)/);
   assert.doesNotMatch(agenda?.promptTemplate ?? "", /Jira details :/);
+});
+
+test("mergeColumns applies flow JSON WebLLM agents; Notify stays Cursor", async () => {
+  const { mergeColumns } = await import("./team-config.ts");
+  const merged = mergeColumns(
+    COLUMNS.map((c) => {
+      if (c.id === PREP_AGENDA_COLUMN_ID) return { ...c, agent: "cursor" as const, webllmProfile: undefined };
+      if (c.id === SYNTHESIZE_COLUMN_ID) return { ...c, agent: "studio" as const, webllmProfile: undefined };
+      if (c.id === SEND_SLACK_COLUMN_ID) return { ...c, agent: "webllm" as const };
+      return c;
+    }),
+  );
+  const agenda = merged.find((c) => c.id === PREP_AGENDA_COLUMN_ID);
+  const spec = merged.find((c) => c.id === SYNTHESIZE_COLUMN_ID);
+  const notify = merged.find((c) => c.id === SEND_SLACK_COLUMN_ID);
+  assert.equal(agenda?.agent, "webllm");
+  assert.equal(agenda?.webllmProfile, "fast");
+  assert.equal(spec?.agent, "webllm");
+  assert.equal(spec?.webllmProfile, "quality");
+  assert.equal(notify?.agent, "cursor");
 });

@@ -73,4 +73,12 @@ test("step labels stay short for the run button", () => {
 test("stepBadge shows Manual for manual stages", () => {
   assert.equal(stepBadge({ agent: "manual", role: "prompt" }, exec), "Manual");
   assert.equal(stepBadge({ agent: "cursor", role: "prompt" }, exec), "Cursor");
+  assert.equal(stepBadge({ agent: "webllm", role: "prompt" }, exec), "WebLLM");
+});
+
+test("WebLLM pin ignores Cursor local/remote target", () => {
+  const step = resolveStep({ agent: "webllm" }, exec);
+  assert.equal(step.kind, "webllm");
+  assert.equal(step.target, "local");
+  assert.match(step.label, /WebLLM/);
 });

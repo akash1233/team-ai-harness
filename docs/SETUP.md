@@ -10,14 +10,14 @@ Repo: [github.com/akash1233/team-ai-harness](https://github.com/akash1233/team-a
 - Homebrew
 - Node.js 22+
 - Chrome or Edge for Grill Me voice
-- For real runs: Cursor CLI (`agent` or `cursor-agent`) and/or Claude Code (`claude`)
+- For real runs: Cursor CLI (`cursor-agent`) and/or Claude Code (`claude`)
 
 ```bash
 brew install node@22
 echo 'export PATH="/opt/homebrew/opt/node@22/bin:$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 node -v          # v22.x
-which agent || which cursor-agent || echo "install Cursor CLI"
+which cursor-agent || echo "install Cursor CLI"
 which claude || echo "install Claude Code"
 ```
 
@@ -28,14 +28,14 @@ Intel Macs: Homebrew is `/usr/local` instead of `/opt/homebrew`. Use that path.
 ```bash
 git clone https://github.com/akash1233/team-ai-harness.git
 cd team-ai-harness
-cp .env.example .env.local
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-The app binds `0.0.0.0:8080`. Start it from **Terminal or iTerm**, not by double-clicking — GUI-launched Node does not inherit your `~/.zshrc` PATH, so `agent` / `claude` look missing.
+The app binds `0.0.0.0:8080`. Start it from **Terminal or iTerm**, not by double-clicking — GUI-launched Node does not inherit your `~/.zshrc` PATH, so `cursor-agent` / `claude` look missing.
 
-`npm run dev` loads `.env` / `.env.local` through `scripts/with-app-env.mjs`. Do not start Vite directly.
+`npm run dev` loads `.env` then `.env.local` through `scripts/with-app-env.mjs`. Do not start Vite directly. Restart after any env change.
 
 ## Install agents (Mac)
 
@@ -52,7 +52,7 @@ agent --version || cursor-agent --version
 
 Docs: [cursor.com/docs/cli/installation](https://cursor.com/docs/cli/installation)
 
-If the binary is `cursor-agent`, set **Cursor command** to `cursor-agent -p --output-format text`.
+Use **`cursor-agent`**, not `agent` — on PATH `agent` is often Grok. Set **Cursor command** to `cursor-agent -p --output-format text` (or `PIT_CURSOR_COMMAND`).
 
 ### Claude Code
 
@@ -68,29 +68,38 @@ claude --version
 
 1. Stop the harness (`Ctrl+C`) and run `npm run dev` again in that same shell.
 2. **Settings → Execution → Test Cursor** and **Test Claude**.
-3. You want a path like `/Users/you/.local/bin/agent`, not “not on PATH”.
+3. You want a path like `/Users/you/.local/bin/cursor-agent`, not “not on PATH”. Settings → Execution → Resolved CLIs shows Cursor vs Grok.
 4. Uncheck **Use demo text if the agent is offline**.
 
 ## Environment
 
-Copy [`.env.example`](../.env.example). Every `PIT_*` key overrides **Team → Execution**.
+Copy [`.env.example`](../.env.example) to `.env`. Put machine-specific overrides in `.env` (gitignored). Every `PIT_*` key overrides **Settings → Execution**. Jira / GitHub PATs are **Settings → Connect**, not env.
 
 | Variable | Meaning |
 | --- | --- |
-| `PIT_DEFAULT_AGENT` | `cursor` \| `claude` \| `studio` \| `cis` for Inherit stages |
+| `PIT_LOG_LEVEL` | `silent` \| `error` \| `warn` \| `info` \| `debug`. Vite terminal + **Settings → Execution → App log**. Default `info`. |
+| `PIT_DEFAULT_AGENT` | Inherit stages: `cursor` \| `claude` \| `studio` \| `cis` \| `webllm` |
 | `PIT_CURSOR_TARGET` / `PIT_CLAUDE_TARGET` | `local` or `remote` |
-| `PIT_CURSOR_COMMAND` | Default `agent -p --output-format text` |
+| `PIT_CURSOR_COMMAND` | Default `cursor-agent -p --output-format text` (not Grok’s `agent`) |
 | `PIT_CLAUDE_COMMAND` | Default `claude -p --output-format text` |
+| `PIT_CURSOR_EXTRA_ARGS` / `PIT_CLAUDE_EXTRA_ARGS` | Extra CLI flags. Cursor default `--trust -f` if unset |
+| `PIT_WORKSPACE` | Cursor `--workspace` / trust root. Empty = cwd of `npm run dev` |
+| `PIT_RUN_IN_TERMINAL` | `1` open Terminal.app (Mac), `0` off |
+| `PIT_FULL_AGENT` | `1` yolo / dontAsk / `-f`. Workday blocks this outside a dev container |
+| `PIT_TIMEOUT_MS` | Test / HTTP probe timeout. Default `120000` |
+| `PIT_STAGE_TIMEOUT_MS` | Non-interactive stage wait. Default `300000` (5 min) |
+| `PIT_NOTIFY_MCP_SETTLE_MS` | Notify auto-harvest delay after MCP success. Default `15000`. `0` = immediate |
+| `PIT_DEMO_FALLBACKS` | `0` fail closed, `1` canned text when the agent is missing |
+| `PIT_WEBLLM_PROFILE` | `fast` \| `balanced` \| `quality` |
+| `PIT_WEBLLM_MODEL` | Optional custom WebLLM model id |
 | `PIT_LOCAL_HTTP_URL` | OpenAI-compatible sidecar; skips CLI if set |
 | `PIT_CURSOR_REMOTE_URL` / `PIT_CLAUDE_REMOTE_URL` | Remote HTTP agent |
 | `PIT_STUDIO_BASE_URL` | GenAI Studio host, no trailing slash |
 | `PIT_FEATURE_KEY` | `wd-pca-feature-key` — your user id, not an API token |
 | `PIT_PROMPT_ID` | Studio prompt id (`File → Copy Prompt ID`) |
-| `PIT_CIS_MODEL` | e.g. `anthropic.claude-haiku-4-5-20251001-v1:0` |
-| `PIT_DEMO_FALLBACKS` | `0` fail closed, `1` canned text when the agent is missing |
-| `PIT_CLAUDE_IN_USD_PER_MTOK` / `PIT_CLAUDE_OUT_USD_PER_MTOK` | Claude $ per million tokens (default 2 / 10) |
-| `PIT_CIS_IN_USD_PER_MTOK` / `PIT_CIS_OUT_USD_PER_MTOK` | CIS $ per million tokens (default 1 / 5) |
+| `PIT_CIS_PROVIDER` / `PIT_CIS_MODEL` / `PIT_CIS_TASK_TYPE` | CIS converse target |
 | `PIT_CHARS_PER_TOKEN` | CLI token estimate (default 4) |
+| `PIT_*_IN_USD_PER_MTOK` / `PIT_*_OUT_USD_PER_MTOK` | Pricing for `CLAUDE`, `CURSOR`, `STUDIO`, `CIS` |
 
 Restart the dev server after changing env.
 

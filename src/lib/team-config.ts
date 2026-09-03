@@ -18,7 +18,9 @@ import { mergePricing } from "./pricing.ts";
 import { createDefaultPrompts, flowStagePromptBody, mergePrompts, stampPromptRefs } from "./prompts.ts";
 import { createDefaultConnectors, mergeConnectors } from "./connectors.ts";
 import { legacyDefaultAgent } from "./agents.ts";
+import { flowStageAgent, flowStageWebllmProfile } from "./flow-spec.ts";
 import { DEFAULT_DOCS } from "./grill-skill.ts";
+import { isWebllmProfile, normalizeWebllmModelIds } from "./webllm.ts";
 import type { ExecutionConfig, Flow, TeamConfig, TeamDoc, TeamMember, WorkflowColumn } from "./types.ts";
 
 export { executionLabel } from "./agents.ts";
@@ -38,7 +40,7 @@ export function createDiscoveryFlow(): Flow {
   return {
     id: DISCOVERY_FLOW_ID,
     name: "Discovery",
-    description: "Brief → agenda (Cursor) → notes → spec (Studio) → Grill Me → backlog (Cursor) → Jira.",
+    description: "Brief → agenda (WebLLM) → notes → spec (WebLLM) → Grill Me → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns()),
     autoAdvance: true,
     autoRun: false,
@@ -50,7 +52,7 @@ export function createQuickSpecFlow(): Flow {
   return {
     id: QUICK_SPEC_FLOW_ID,
     name: "Quick spec",
-    description: "Skip agenda and Slack. Brief → spec (Studio) → grill → backlog (Cursor) → Jira.",
+    description: "Skip agenda and Slack. Brief → spec (WebLLM) → grill → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns([
       IDEATION_COLUMN_ID,
       SYNTHESIZE_COLUMN_ID,
@@ -76,7 +78,7 @@ export function createDefaultExecution(): ExecutionConfig {
     defaultAgent: "cursor",
     cursorTarget: "local",
     claudeTarget: "local",
-    cursorCommand: "agent -p --output-format text",
+    cursorCommand: "cursor-agent -p --output-format text",
     claudeCommand: "claude -p --output-format text",
     localHttpUrl: "",
     cursorRemoteUrl: "",
@@ -98,6 +100,9 @@ export function createDefaultExecution(): ExecutionConfig {
     claudeExtraArgs: "--permission-mode default",
     runInTerminal: true,
     fullAgentMode: false,
+    webllmProfile: "balanced",
+    webllmModelId: "",
+    webllmExtraModelIds: [],
     provider: "local",
     localAgent: "cursor",
   };
@@ -140,10 +145,16 @@ export function mergeColumns(saved?: WorkflowColumn[]): WorkflowColumn[] {
       agent: col.agent ?? base?.agent ?? (col.role === "collect-input" ? "manual" : "inherit"),
       outputKey: col.outputKey ?? base?.outputKey,
       promptRef: col.promptRef ?? base?.promptRef,
+      webllmProfile: isWebllmProfile(col.webllmProfile) ? col.webllmProfile : base?.webllmProfile,
     };
     if (col.id === SEND_SLACK_COLUMN_ID) {
       merged.agent = "cursor";
       merged.promptTemplate = NOTIFY_PROMPT_TEMPLATE;
+    } else {
+      const flowAgent = flowStageAgent(col.id);
+      if (flowAgent) merged.agent = flowAgent;
+      const flowProfile = flowStageWebllmProfile(col.id);
+      if (flowProfile) merged.webllmProfile = flowProfile;
     }
     const flowBody = flowStagePromptBody(col.id);
     if (flowBody !== undefined) merged.promptTemplate = flowBody;
@@ -168,6 +179,9 @@ export function mergeExecution(saved?: Partial<ExecutionConfig>): ExecutionConfi
   const fromLegacy = legacyDefaultAgent(saved);
   if (!saved?.defaultAgent && fromLegacy) merged.defaultAgent = fromLegacy;
   merged.pricing = mergePricing(saved?.pricing);
+  merged.webllmProfile = isWebllmProfile(saved?.webllmProfile) ? saved.webllmProfile : d.webllmProfile;
+  merged.webllmModelId = typeof saved?.webllmModelId === "string" ? saved.webllmModelId : d.webllmModelId;
+  merged.webllmExtraModelIds = normalizeWebllmModelIds(saved?.webllmExtraModelIds ?? d.webllmExtraModelIds);
   return merged;
 }
 

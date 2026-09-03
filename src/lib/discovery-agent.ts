@@ -15,8 +15,9 @@ import {
   columnById,
 } from "./columns";
 import { fallbackFor } from "./agent-fallbacks";
-import { formatKindlingTerminalTitle } from "./cli-session";
+import { formatKindlingTerminalTitle, stripThinkBlocks } from "./cli-session";
 import { createDefaultExecution } from "./team-config";
+import { clip, getLogBuffer, getLogLevel, startCall } from "./logger";
 
 export type AgentResult =
   | {
@@ -90,11 +91,7 @@ export type AgentInput = {
   promptOverride?: StagePayload;
 };
 
-export function extractPlan(text: string): Plan | undefined {
-  const start = text.indexOf(PLAN_JSON_START);
-  const end = text.indexOf(PLAN_JSON_END);
-  if (start < 0 || end < 0 || end <= start) return undefined;
-  const raw = text.slice(start + PLAN_JSON_START.length, end).trim();
+function parsePlanJson(raw: string): Plan | undefined {
   try {
     const parsed = JSON.parse(raw) as Plan;
     if (!parsed || !Array.isArray(parsed.steps)) return undefined;
@@ -102,6 +99,19 @@ export function extractPlan(text: string): Plan | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function extractPlan(text: string): Plan | undefined {
+  const start = text.indexOf(PLAN_JSON_START);
+  const end = text.indexOf(PLAN_JSON_END);
+  if (start >= 0 && end > start) {
+    const fenced = parsePlanJson(text.slice(start + PLAN_JSON_START.length, end).trim());
+    if (fenced) return fenced;
+  }
+  const trimmed = text.trim();
+  const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fence?.[1]?.trim() ?? (trimmed.startsWith("{") ? trimmed : "");
+  return candidate ? parsePlanJson(candidate) : undefined;
 }
 
 export function extractGrill(text: string): { frontierEmpty: boolean; questions: GrillQuestion[] } | undefined {
@@ -188,11 +198,19 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
         ? crypto.randomUUID()
         : `run-${Date.now()}`;
 
+    const span = startCall("exec.stage", {
+      columnId,
+      ticket: ticket.key,
+      stepAgent: stepAgent ?? "inherit",
+      runId,
+    });
     const { prompt } = await resolveStagePayload(data);
     const input = recordedInput(prompt.system, prompt.user);
+    span.log.debug("prompt", { chars: input.length, prompt: clip(input) });
 
     if (columnId === FILE_JIRA_COLUMN_ID) {
       if (!ticket.plan?.steps?.length) {
+        span.fail("no approved plan", { via: "file-jira", blocked: true });
         return {
           ok: true,
           text: "",
@@ -208,6 +226,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
         const edited = JSON.parse(prompt.user) as Plan;
         if (Array.isArray(edited.steps)) filingPlan = edited;
       } catch {
+        span.fail("Edited Jira payload must be valid plan JSON");
         return {
           ok: false,
           error: "Edited Jira payload must be valid plan JSON",
@@ -215,6 +234,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
         };
       }
       if (!filingPlan.steps.length) {
+        span.fail("no approved plan", { via: "file-jira", blocked: true });
         return {
           ok: true,
           text: "",
@@ -233,6 +253,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
         return { key: `X2-${n}`, title: step.title, kind };
       });
       const text = jira.map((j) => `${j.key}  ${j.title}`).join("\n");
+      span.ok({ via: "file-jira", issues: jira.length });
       return {
         ok: true,
         text: `Created:\n${text}`,
@@ -247,18 +268,14 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
     if (columnId === SEND_SLACK_COLUMN_ID) {
       const ctx = buildContext(ticket, data.docs);
       if (!ctx.slackChannelId?.trim()) {
-        return {
-          ok: false,
-          error: "Missing Slack channel ID — set it in Brief or Team Settings",
-          input,
-        };
+        const error = "Missing Slack channel ID — set it in Brief or Team Settings";
+        span.fail(error);
+        return { ok: false, error, input };
       }
       if (!ctx.slackMessage?.trim()) {
-        return {
-          ok: false,
-          error: "Missing agenda message — run Agenda and approve it before Notify",
-          input,
-        };
+        const error = "Missing agenda message — run Agenda and approve it before Notify";
+        span.fail(error);
+        return { ok: false, error, input };
       }
     }
 
@@ -286,6 +303,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
       terminalTitle,
     });
     if (live.sessionDir) {
+      span.ok({ via: live.via, sessionDir: live.sessionDir, pending: true });
       return {
         ok: true,
         text: live.text,
@@ -304,9 +322,10 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
         ? false
         : !live.ok && (notifyExecution?.demoFallbacks ?? execution?.demoFallbacks ?? true);
     if (!live.ok && !useDemo) {
+      span.fail(live.error || "Agent failed", { via: live.via });
       return { ok: false, error: live.error || "Agent failed", via: live.via, input };
     }
-    const text = live.ok && live.text.trim() ? live.text.trim() : fb.text;
+    const text = stripThinkBlocks(live.ok && live.text.trim() ? live.text.trim() : fb.text);
     const via = live.ok ? live.via : "demo";
     const spend = live.ok && !useDemo ? live.spend ?? 0 : 0;
 
@@ -326,6 +345,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
               ? "Notify run"
               : "Agent response";
 
+    span.ok({ via, chars: text.length, demo: via === "demo" });
     return {
       ok: true,
       text,
@@ -351,6 +371,30 @@ export const flushLiveSession = createServerFn({ method: "POST" })
       columnId: data.columnId,
       hasSlackMessage: data.hasSlackMessage,
     });
+  });
+
+export const inspectCliBins = createServerFn({ method: "POST" })
+  .validator((input: { execution?: ExecutionConfig }) => input)
+  .handler(async ({ data }) => {
+    const exec = await import("./execution.server");
+    return exec.inspectCliBins(data.execution);
+  });
+
+export const readAppLogs = createServerFn({ method: "POST" })
+  .validator((input?: unknown) => input ?? {})
+  .handler(async () => {
+    return {
+      level: getLogLevel(),
+      lines: getLogBuffer().map((r) => r.line),
+    };
+  });
+
+export const appendAppLogs = createServerFn({ method: "POST" })
+  .validator((input: { lines?: string[] }) => input)
+  .handler(async ({ data }) => {
+    const { ingestLogLines } = await import("./logger");
+    ingestLogLines(data.lines ?? []);
+    return { ok: true as const };
   });
 
 export const testExecution = createServerFn({ method: "POST" })

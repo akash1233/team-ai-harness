@@ -1,4 +1,5 @@
 import { extractNotifyMcpResult } from "./discovery-slack.ts";
+import { clip, createLogger } from "./logger.ts";
 
 /** Non-interactive flags so Cursor/Claude do not block on a TTY trust prompt. */
 export function withNonInteractiveFlags(
@@ -80,19 +81,38 @@ export function stripAnsi(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
 }
 
+/**
+ * Qwen3 / reasoning models emit chain-of-thought in <think>…</think>
+ * before the operator-facing document. Pipeline vars must store only
+ * the final answer (the agenda, spec, JSON, …).
+ *
+ * Keep everything after the last closed think block. Drop an unclosed
+ * leading think (stream cut off mid-thought) rather than harvest it.
+ */
+export function stripThinkBlocks(text: string): string {
+  if (!text) return "";
+  let out = text.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "");
+  const open = out.search(/<think\b/i);
+  if (open >= 0 && !/<\/think>/i.test(out)) {
+    out = open === 0 ? "" : out.slice(0, open);
+  }
+  return out.trim();
+}
+
 export function stageOutputFromLog(log: string): string {
-  return stripAnsi(log)
-    .split("\n")
-    .filter(
-      (l) =>
-        !/^\[kindling\]/i.test(l) &&
-        !/^cursor-retrieval:/i.test(l) &&
-        !/^nvm is not compatible/i.test(l) &&
-        !/^Run `unset/i.test(l) &&
-        !/^Kindling /i.test(l),
-    )
-    .join("\n")
-    .trim();
+  return stripThinkBlocks(
+    stripAnsi(log)
+      .split("\n")
+      .filter(
+        (l) =>
+          !/^\[kindling\]/i.test(l) &&
+          !/^cursor-retrieval:/i.test(l) &&
+          !/^nvm is not compatible/i.test(l) &&
+          !/^Run `unset/i.test(l) &&
+          !/^Kindling /i.test(l),
+      )
+      .join("\n"),
+  );
 }
 
 export function resolveCursorModel(raw?: string): string {
@@ -102,7 +122,7 @@ export function resolveCursorModel(raw?: string): string {
 }
 
 export function withCursorWorkspace(args: string[], workspace: string): string[] {
-  if (!workspace || args.includes("--workspace")) return args;
+  if (!workspace || args.includes("--workspace") || args.some((a) => a.startsWith("--workspace="))) return args;
   return ["--workspace", workspace, ...args];
 }
 
@@ -337,6 +357,15 @@ export async function startMacSession(
   await fs.writeFile(startedFile, String(Date.now()));
   const promptArg = prompt !== undefined ? ` "$(cat ${shellQuote(promptFile)})"` : "";
   if (prompt !== undefined) await fs.writeFile(promptFile, prompt);
+  const cliLog = createLogger("exec.cli");
+  cliLog.info("terminal", {
+    bin,
+    args: args.join(" "),
+    cwd,
+    title: opts?.title,
+    promptChars: prompt?.length ?? 0,
+  });
+  if (prompt) cliLog.debug("prompt", { prompt: clip(prompt) });
   await fs.writeFile(
     outFile,
     `[kindling] ${new Date().toISOString()} starting\n[kindling] cwd ${cwd}\n[kindling] ${bin} ${args.join(" ")}${prompt !== undefined ? " $(cat prompt.md)" : ""}\n${prompt !== undefined ? `[kindling] prompt: ${prompt.slice(0, 240).replace(/\n/g, " ")}\n` : ""}`,
@@ -430,6 +459,14 @@ export async function runAgentProcess(opts: {
   terminalTitle?: string;
 }): Promise<{ code: number | null; out: string; err: string; via: "terminal" | "spawn" }> {
   const args = opts.fullAgent ? opts.args : withoutFullAgentMode(opts.args);
+  createLogger("exec.cli").debug("process", {
+    bin: opts.bin,
+    args: args.join(" "),
+    cwd: opts.cwd,
+    timeoutMs: opts.timeoutMs,
+    inTerminal: opts.inTerminal,
+    promptChars: opts.prompt?.length ?? 0,
+  });
   if (opts.inTerminal && process.platform === "darwin") {
     const r = await runInMacTerminal(
       opts.cwd,
@@ -468,6 +505,16 @@ export async function startInteractiveSession(
   const script = path.join(dir, scriptName);
   await fs.writeFile(path.join(dir, "started.txt"), String(Date.now()));
   await fs.writeFile(promptFile, prompt);
+  const cliLog = createLogger("exec.cli");
+  cliLog.info("interactive", {
+    bin,
+    args: args.join(" "),
+    cwd,
+    title: opts?.title,
+    promptChars: prompt.length,
+    sessionDir: dir,
+  });
+  cliLog.debug("prompt", { prompt: clip(prompt) });
   await fs.writeFile(
     outFile,
     `[kindling] ${new Date().toISOString()} long stage\n[kindling] ${bin} ${args.join(" ")} $(cat prompt.md)\n`,

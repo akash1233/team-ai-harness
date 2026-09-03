@@ -49,7 +49,8 @@ export const COLUMNS: WorkflowColumn[] = [
     role: "prompt",
     rail: "run",
     enabled: true,
-    agent: "cursor",
+    agent: "webllm",
+    webllmProfile: "fast",
     promptTemplate: `Write a Team Discussion Agenda with exactly these sections:
 1. Problem / Goals / Metrics
 2. Users / Personas / Stories
@@ -95,7 +96,8 @@ Do not send Slack. Do not create Jira issues. Agenda document only.`,
     role: "prompt",
     rail: "run",
     enabled: true,
-    agent: "studio",
+    agent: "webllm",
+    webllmProfile: "quality",
     promptTemplate: `Turn ideation, the Jira issue, and the meeting transcript into a spec.
 Cover: problem, solution, user stories, implementation decisions, testing decisions, out of scope.
 Do not interview. Do not create Jira issues.

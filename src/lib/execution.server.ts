@@ -1,5 +1,6 @@
 import { createDefaultExecution } from "./team-config.ts";
-import { legacyDefaultAgent, resolveStep } from "./agents.ts";
+import { isAgentKind, legacyDefaultAgent, resolveStep } from "./agents.ts";
+import { isWebllmProfile } from "./webllm.ts";
 import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing.ts";
 import {
   ensurePrintMode,
@@ -24,6 +25,7 @@ import {
   withoutFullAgentMode,
 } from "./cli-session.ts";
 import type { AgentKind, ExecutionConfig, StepAgent, TokenUsage } from "./types.ts";
+import { clip, createLogger, startCall } from "./logger.ts";
 
 export type ModelCall = {
   text: string;
@@ -45,10 +47,12 @@ export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
   const base = { ...createDefaultExecution(), ...client };
   const fromLegacy = legacyDefaultAgent(client);
   const envKind = envStr("PIT_PROVIDER") ?? envStr("PIT_DEFAULT_AGENT");
-  const defaultAgent: AgentKind =
-    envKind === "cursor" || envKind === "claude" || envKind === "studio" || envKind === "cis"
-      ? envKind
-      : (client?.defaultAgent ?? fromLegacy ?? base.defaultAgent);
+  const defaultAgent: AgentKind = isAgentKind(envKind)
+    ? envKind
+    : (client?.defaultAgent ?? fromLegacy ?? base.defaultAgent);
+  const envProfile = envStr("PIT_WEBLLM_PROFILE");
+  const webllmProfile = isWebllmProfile(envProfile) ? envProfile : base.webllmProfile ?? "balanced";
+  const webllmModelId = envStr("PIT_WEBLLM_MODEL") || base.webllmModelId || "";
   const cursorTarget = envStr("PIT_CURSOR_TARGET") === "remote" ? "remote" : envStr("PIT_CURSOR_TARGET") === "local" ? "local" : base.cursorTarget;
   const claudeTarget = envStr("PIT_CLAUDE_TARGET") === "remote" ? "remote" : envStr("PIT_CLAUDE_TARGET") === "local" ? "local" : base.claudeTarget;
   const seeded = mergePricing(base.pricing);
@@ -98,6 +102,8 @@ export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
     claudeExtraArgs: envStr("PIT_CLAUDE_EXTRA_ARGS") || base.claudeExtraArgs || "",
     runInTerminal: envStr("PIT_RUN_IN_TERMINAL") === "0" ? false : envStr("PIT_RUN_IN_TERMINAL") === "1" ? true : base.runInTerminal !== false,
     fullAgentMode: envStr("PIT_FULL_AGENT") === "1" ? true : envStr("PIT_FULL_AGENT") === "0" ? false : Boolean(base.fullAgentMode),
+    webllmProfile,
+    webllmModelId,
   };
 }
 
@@ -242,9 +248,12 @@ async function invokeCli(
   const line = kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
   const { bin, args } = parseCommand(line);
   const via = kind === "claude" ? "Claude" : "Cursor";
-  const found = await lookupBin(bin);
+  const call = startCall("exec.cli", { kind, via, printMode });
+  const found = kind === "cursor" ? await lookupCursorBin(bin) : await lookupBin(bin);
   if (!found) {
-    return { ok: false, text: "", via, error: `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.` };
+    const error = `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.`;
+    call.fail(error, { bin });
+    return { ok: false, text: "", via, error };
   }
   const cwd = workspaceOf(exec);
   let flags = withNonInteractiveFlags(
@@ -265,6 +274,14 @@ async function invokeCli(
       const chat = await tryCursorChatId(found, cwd);
       if (chat) flags = ["--resume", chat, ...flags];
     }
+    call.log.debug("interactive", {
+      bin: found,
+      args: flags.join(" "),
+      cwd,
+      promptChars: prompt.length,
+      prompt: clip(prompt),
+      title: terminalTitle,
+    });
     const session = await startInteractiveSession(
       cwd,
       found,
@@ -272,6 +289,7 @@ async function invokeCli(
       prompt,
       terminalTitle ? { title: terminalTitle } : undefined,
     );
+    call.ok({ via: `${via} Terminal`, sessionDir: session.dir, pending: true });
     return {
       ok: true,
       text: "Long stage opened in Terminal. Answer any prompts there. Close the window when the agent is done — Kindling is tailing the log.",
@@ -284,6 +302,15 @@ async function invokeCli(
   if (kind === "claude" && !flags.includes("--session-id")) {
     flags = ["--session-id", crypto.randomUUID(), ...flags];
   }
+  call.log.debug("spawn", {
+    bin: found,
+    args: flags.join(" "),
+    cwd,
+    timeoutMs: timeoutMs ?? exec.stageTimeoutMs ?? exec.timeoutMs,
+    inTerminal: Boolean(exec.runInTerminal),
+    promptChars: prompt.length,
+    prompt: clip(prompt),
+  });
   const raw = await runAgentProcess({
     bin: found,
     args: flags,
@@ -296,18 +323,22 @@ async function invokeCli(
   });
   const body = stageOutputFromLog(raw.out || raw.err);
   const live = raw.via === "terminal" && body.length > 0;
+  const resultVia = raw.via === "terminal" ? `${via} Terminal` : via;
   if ((raw.code === 0 && body) || live) {
-    return { ok: true, text: body, via: raw.via === "terminal" ? `${via} Terminal` : via };
+    call.ok({ via: resultVia, chars: body.length, spawnVia: raw.via });
+    return { ok: true, text: body, via: resultVia };
   }
   const timedOut = /timed out after/i.test(raw.err);
   const limit = timeoutMs ?? exec.stageTimeoutMs ?? exec.timeoutMs;
+  const error = timedOut
+    ? `Timed out after ${Math.round(limit / 60000)}m waiting for the agent. Rerun the stage, or raise the limit in Settings → Execution (Stage timeout).`
+    : explainCliFailure(body || `exit ${raw.code}`);
+  call.fail(error, { via: resultVia, code: raw.code, chars: body.length });
   return {
     ok: false,
     text: body,
-    via: raw.via === "terminal" ? `${via} Terminal` : via,
-    error: timedOut
-      ? `Timed out after ${Math.round(limit / 60000)}m waiting for the agent. Rerun the stage, or raise the limit in Settings → Execution (Stage timeout).`
-      : explainCliFailure(body || `exit ${raw.code}`),
+    via: resultVia,
+    error,
   };
 }
 
@@ -350,6 +381,8 @@ async function callLocalHttp(
 ): Promise<ModelCall> {
   const url = chatCompletionsUrl(urlBase);
   const via = kind === "claude" ? "Claude HTTP" : "Cursor HTTP";
+  const call = startCall("exec.http", { kind, via, url: safeUrl(url), maxTokens });
+  call.log.debug("prompt", { chars: system.length + user.length, prompt: clip(`${system}\n\n${user}`) });
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -373,13 +406,20 @@ async function callLocalHttp(
       /* text body */
     }
     if (!res.ok) {
-      return { ok: false, text: "", via, error: `${via} ${res.status}: ${raw.slice(0, 400)}` };
+      const error = `${via} ${res.status}: ${raw.slice(0, 400)}`;
+      call.fail(error, { status: res.status });
+      return { ok: false, text: "", via, error };
     }
     const text = extractModelText(json) || (typeof json === "string" ? json : "");
-    if (!text.trim()) return { ok: false, text: "", via, error: `${via} returned an empty body` };
+    if (!text.trim()) {
+      call.fail(`${via} returned an empty body`, { status: res.status });
+      return { ok: false, text: "", via, error: `${via} returned an empty body` };
+    }
+    call.ok({ status: res.status, chars: text.length });
     return { ok: true, text, via, usage: extractUsage(json) ?? undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    call.fail(`${via}: ${message}`);
     return { ok: false, text: "", via, error: `${via}: ${message}` };
   }
 }
@@ -389,16 +429,24 @@ async function callStudio(
   prompt: string,
   promptId: string,
 ): Promise<ModelCall> {
+  const call = startCall("exec.http", { kind: "studio", via: "Studio", promptId });
   if (!exec.studioBaseUrl) {
-    return { ok: false, text: "", via: "Studio", error: "Set Studio base URL in Team → Execution." };
+    const error = "Set Studio base URL in Team → Execution.";
+    call.fail(error);
+    return { ok: false, text: "", via: "Studio", error };
   }
   if (!exec.featureKey) {
-    return { ok: false, text: "", via: "Studio", error: "Set wd-pca-feature-key (your user ID) in Team → Execution." };
+    const error = "Set wd-pca-feature-key (your user ID) in Team → Execution.";
+    call.fail(error);
+    return { ok: false, text: "", via: "Studio", error };
   }
   if (!promptId) {
-    return { ok: false, text: "", via: "Studio", error: "Set a GenAI Studio prompt ID." };
+    const error = "Set a GenAI Studio prompt ID.";
+    call.fail(error);
+    return { ok: false, text: "", via: "Studio", error };
   }
   const url = `${exec.studioBaseUrl}/v1alpha/prediction/cis/generate/${encodeURIComponent(promptId)}`;
+  call.log.debug("request", { url: safeUrl(url), promptChars: prompt.length, prompt: clip(prompt) });
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -419,13 +467,20 @@ async function callStudio(
       /* text */
     }
     if (!res.ok) {
-      return { ok: false, text: "", via: "Studio", error: `Studio ${res.status}: ${raw.slice(0, 400)}` };
+      const error = `Studio ${res.status}: ${raw.slice(0, 400)}`;
+      call.fail(error, { status: res.status });
+      return { ok: false, text: "", via: "Studio", error };
     }
     const text = extractModelText(json);
-    if (!text) return { ok: false, text: "", via: "Studio", error: "Studio returned no model text." };
+    if (!text) {
+      call.fail("Studio returned no model text.", { status: res.status });
+      return { ok: false, text: "", via: "Studio", error: "Studio returned no model text." };
+    }
+    call.ok({ status: res.status, chars: text.length });
     return { ok: true, text, via: "Studio", usage: extractUsage(json) ?? undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    call.fail(`Studio: ${message}`);
     return { ok: false, text: "", via: "Studio", error: `Studio: ${message}` };
   }
 }
@@ -435,13 +490,19 @@ async function callCis(
   prompt: string,
   maxTokens: number,
 ): Promise<ModelCall> {
+  const call = startCall("exec.http", { kind: "cis", via: "CIS", maxTokens });
   if (!exec.studioBaseUrl) {
-    return { ok: false, text: "", via: "CIS", error: "Set Studio base URL in Team → Execution." };
+    const error = "Set Studio base URL in Team → Execution.";
+    call.fail(error);
+    return { ok: false, text: "", via: "CIS", error };
   }
   if (!exec.featureKey) {
-    return { ok: false, text: "", via: "CIS", error: "Set wd-pca-feature-key (your user ID) in Team → Execution." };
+    const error = "Set wd-pca-feature-key (your user ID) in Team → Execution.";
+    call.fail(error);
+    return { ok: false, text: "", via: "CIS", error };
   }
   const url = `${exec.studioBaseUrl}/cis/v1alpha1/predictions`;
+  call.log.debug("request", { url: safeUrl(url), promptChars: prompt.length, prompt: clip(prompt), model: exec.cisModel });
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -483,14 +544,32 @@ async function callCis(
       /* text */
     }
     if (!res.ok) {
-      return { ok: false, text: "", via: "CIS", error: `CIS ${res.status}: ${raw.slice(0, 400)}` };
+      const error = `CIS ${res.status}: ${raw.slice(0, 400)}`;
+      call.fail(error, { status: res.status });
+      return { ok: false, text: "", via: "CIS", error };
     }
     const text = extractModelText(json);
-    if (!text) return { ok: false, text: "", via: "CIS", error: "CIS returned no model text." };
+    if (!text) {
+      call.fail("CIS returned no model text.", { status: res.status });
+      return { ok: false, text: "", via: "CIS", error: "CIS returned no model text." };
+    }
+    call.ok({ status: res.status, chars: text.length });
     return { ok: true, text, via: "CIS", usage: extractUsage(json) ?? undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    call.fail(`CIS: ${message}`);
     return { ok: false, text: "", via: "CIS", error: `CIS: ${message}` };
+  }
+}
+
+function safeUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return clip(url, 120);
   }
 }
 
@@ -505,6 +584,8 @@ async function callRemoteAgent(
   const via = kind === "claude" ? "Claude remote" : "Cursor remote";
   const looksOpenAi = /\/v1(\/|$)/.test(url) || url.includes("chat/completions");
   if (looksOpenAi) return callLocalHttp(url, kind, exec, system, user, maxTokens);
+  const call = startCall("exec.http", { kind, via, url: safeUrl(url), maxTokens });
+  call.log.debug("prompt", { chars: system.length + user.length, prompt: clip(`${system}\n\n${user}`) });
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -528,12 +609,21 @@ async function callRemoteAgent(
     } catch {
       /* text */
     }
-    if (!res.ok) return { ok: false, text: "", via, error: `${via} ${res.status}: ${raw.slice(0, 400)}` };
+    if (!res.ok) {
+      const error = `${via} ${res.status}: ${raw.slice(0, 400)}`;
+      call.fail(error, { status: res.status });
+      return { ok: false, text: "", via, error };
+    }
     const text = extractModelText(json) || (typeof json === "string" ? json : "");
-    if (!text.trim()) return { ok: false, text: "", via, error: `${via} returned an empty body` };
+    if (!text.trim()) {
+      call.fail(`${via} returned an empty body`, { status: res.status });
+      return { ok: false, text: "", via, error: `${via} returned an empty body` };
+    }
+    call.ok({ status: res.status, chars: text.length });
     return { ok: true, text, via, usage: extractUsage(json) ?? undefined };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    call.fail(`${via}: ${message}`);
     return { ok: false, text: "", via, error: `${via}: ${message}` };
   }
 }
@@ -551,8 +641,28 @@ export async function runModel(opts: {
   const step = resolveStep({ agent: opts.stepAgent ?? "inherit" }, exec);
   const prompt = [opts.system, opts.user].filter(Boolean).join("\n\n");
   const promptId = opts.promptId || exec.promptId;
-  const cost = (call: ModelCall) => attachCost(call, exec, step.kind, opts.system, opts.user);
+  const span = startCall("exec", {
+    kind: step.kind,
+    target: step.target,
+    via: step.label,
+    maxTokens: opts.maxTokens,
+  });
+  span.log.debug("prompt", { chars: prompt.length, prompt: clip(prompt), title: opts.terminalTitle });
+  const cost = (result: ModelCall) => {
+    const priced = attachCost(result, exec, step.kind, opts.system, opts.user);
+    if (priced.ok) span.ok({ via: priced.via, chars: priced.text.length, pending: priced.pending, sessionDir: priced.sessionDir });
+    else span.fail(priced.error || "empty response", { via: priced.via });
+    return priced;
+  };
 
+  if (step.kind === "webllm") {
+    return cost({
+      ok: false,
+      text: "",
+      via: step.label,
+      error: "WebLLM runs in this browser tab, not on the server. Pin the stage to WebLLM and run it from the board.",
+    });
+  }
   if (step.kind === "studio") return cost(await callStudio(exec, prompt, promptId));
   if (step.kind === "cis") return cost(await callCis(exec, prompt, opts.maxTokens));
 
@@ -590,7 +700,7 @@ async function locateCli(kind: "cursor" | "claude", exec: ExecutionConfig): Prom
   const names = [bin, ...aliases.filter((a) => a !== bin)];
   let found: LocatedCli["found"] = null;
   for (const name of names) {
-    const hit = await locateBin(name);
+    const hit = await locateBin(name, kind === "cursor");
     if (hit) {
       found = { ...hit, name };
       break;
@@ -599,7 +709,7 @@ async function locateCli(kind: "cursor" | "claude", exec: ExecutionConfig): Prom
   return { kind, bin, args, found };
 }
 
-function pushCliChecks(checks: SetupCheck[], located: LocatedCli): boolean {
+async function pushCliChecks(checks: SetupCheck[], located: LocatedCli): Promise<boolean> {
   const via = located.kind === "claude" ? "Claude" : "Cursor";
   if (!located.found) {
     checks.push({
@@ -609,23 +719,34 @@ function pushCliChecks(checks: SetupCheck[], located: LocatedCli): boolean {
     });
     return false;
   }
-  if (located.found.name !== located.bin) {
+  const version = await runVersion(located.found.path);
+  const real = (await realPathIfExists(located.found.path)) ?? located.found.path;
+  const identity = classifyCliIdentity(real, version.text);
+  if (located.kind === "cursor" && identity === "grok") {
     checks.push({
       ok: false,
-      label: `${via} command`,
-      detail: `Configured \`${located.bin}\` is missing. Found \`${located.found.name}\` at ${located.found.path}. Set the local command to: ${located.found.name} -p --output-format text`,
+      label: "Cursor CLI",
+      detail: `Resolved to Grok (${located.found.path}${real !== located.found.path ? ` → ${real}` : ""}, ${version.text}). Kindling will skip this and look for cursor-agent.`,
+    });
+    return false;
+  }
+  if (located.found.name !== located.bin) {
+    checks.push({
+      ok: true,
+      label: `${via} CLI`,
+      detail: `Using \`${located.found.name}\` at ${located.found.path} (${identity}${version.text ? `, ${version.text}` : ""}). Configured command was \`${located.bin}\`.`,
     });
   } else if (!located.found.onPath) {
     checks.push({
       ok: true,
       label: `${via} CLI`,
-      detail: `Found at ${located.found.path} (not on Node PATH). Runs will use this path.`,
+      detail: `Found at ${located.found.path} (not on Node PATH). ${identity}${version.text ? ` · ${version.text}` : ""}`,
     });
   } else {
     checks.push({
       ok: true,
       label: `${via} CLI`,
-      detail: `Found ${located.found.name} at ${located.found.path}`,
+      detail: `${located.found.path}${real !== located.found.path ? ` → ${real}` : ""} · ${identity}${version.text ? ` · ${version.text}` : ""}`,
     });
   }
   return true;
@@ -723,24 +844,106 @@ async function lookupBin(bin: string): Promise<string | null> {
   return hit?.path ?? null;
 }
 
-async function locateBin(bin: string): Promise<{ path: string; onPath: boolean } | null> {
-  const { existsSync } = await import("node:fs");
+/** Grok Build TUI also ships as `agent` and now shadows Cursor on PATH. Never use it for Cursor stages. */
+export function isGrokAgentPath(p: string): boolean {
+  const n = p.replace(/\\/g, "/").toLowerCase();
+  return n.includes("/.grok/") || n.includes("grok-macos") || n.includes("grok-linux") || n.includes("grok-windows");
+}
+
+async function realPathIfExists(candidate: string): Promise<string | null> {
+  const { existsSync, realpathSync } = await import("node:fs");
+  if (!existsSync(candidate)) return null;
+  try {
+    return realpathSync(candidate);
+  } catch {
+    return candidate;
+  }
+}
+
+async function locateBin(bin: string, skipGrok = false): Promise<{ path: string; onPath: boolean } | null> {
   const { delimiter, join } = await import("node:path");
   if (!bin) return null;
+  const consider = async (candidate: string, onPath: boolean) => {
+    const resolved = await realPathIfExists(candidate);
+    if (!resolved) return null;
+    if (skipGrok && (isGrokAgentPath(candidate) || isGrokAgentPath(resolved))) return null;
+    return { path: candidate, onPath };
+  };
   if (bin.includes("/") || bin.includes("\\")) {
-    return existsSync(bin) ? { path: bin, onPath: true } : null;
+    return consider(bin, true);
   }
   const pathDirs = (process.env.PATH || "").split(delimiter).filter(Boolean);
   for (const dir of pathDirs) {
-    const candidate = join(dir, bin);
-    if (existsSync(candidate)) return { path: candidate, onPath: true };
+    const hit = await consider(join(dir, bin), true);
+    if (hit) return hit;
   }
   for (const dir of extraBinDirs()) {
     if (pathDirs.includes(dir)) continue;
-    const candidate = join(dir, bin);
-    if (existsSync(candidate)) return { path: candidate, onPath: false };
+    const hit = await consider(join(dir, bin), false);
+    if (hit) return hit;
   }
   return null;
+}
+
+async function lookupCursorBin(configured: string): Promise<string | null> {
+  const names = [configured, "cursor-agent", "agent", "cursor"].filter((n, i, all) => n && all.indexOf(n) === i);
+  for (const name of names) {
+    const hit = await locateBin(name, true);
+    if (hit) return hit.path;
+  }
+  return null;
+}
+
+export type CliIdentity = "cursor" | "grok" | "claude" | "unknown" | "missing";
+
+export type CliBinInfo = {
+  configured: string;
+  path: string | null;
+  realPath: string | null;
+  version: string;
+  identity: CliIdentity;
+};
+
+export type CliInspectReport = {
+  cursor: CliBinInfo;
+  grokOnPath: CliBinInfo | null;
+  claude: CliBinInfo;
+};
+
+export function classifyCliIdentity(path: string | null, version: string): CliIdentity {
+  if (!path) return "missing";
+  if (isGrokAgentPath(path) || /^grok\b/i.test(version)) return "grok";
+  if (/cursor-agent/i.test(path) || /^\d{4}\.\d{2}\.\d{2}/.test(version)) return "cursor";
+  if (/claude/i.test(path) || /^claude\b/i.test(version)) return "claude";
+  return "unknown";
+}
+
+async function describeBin(configured: string, path: string | null): Promise<CliBinInfo> {
+  const realPath = path ? ((await realPathIfExists(path)) ?? path) : null;
+  const version = path ? (await runVersion(path)).text : "";
+  return {
+    configured,
+    path,
+    realPath: realPath && realPath !== path ? realPath : path,
+    version,
+    identity: classifyCliIdentity(realPath ?? path, version),
+  };
+}
+
+export async function inspectCliBins(client?: ExecutionConfig): Promise<CliInspectReport> {
+  const exec = resolveExecution(client);
+  const cursorBin = parseCommand(exec.cursorCommand).bin;
+  const claudeBin = parseCommand(exec.claudeCommand).bin;
+  const cursorPath = await lookupCursorBin(cursorBin);
+  const grokHit = await locateBin("agent", false);
+  const grokPath =
+    grokHit && isGrokAgentPath((await realPathIfExists(grokHit.path)) ?? grokHit.path) ? grokHit.path : null;
+  const claudePath = await lookupBin(claudeBin);
+  const cursor = await describeBin(exec.cursorCommand, cursorPath);
+  const claude = await describeBin(exec.claudeCommand, claudePath);
+  const grokOnPath =
+    grokPath && grokPath !== cursorPath ? await describeBin("agent (PATH)", grokPath) : null;
+  return { cursor, grokOnPath, claude };
 }
 
 async function runVersion(binPath: string): Promise<{ ok: boolean; text: string }> {
@@ -751,7 +954,7 @@ async function runVersion(binPath: string): Promise<{ ok: boolean; text: string 
   return { ok: false, text: text || `${binPath} --version timed out` };
 }
 
-const CURSOR_ALIASES = ["agent", "cursor-agent", "cursor"];
+const CURSOR_ALIASES = ["cursor-agent", "agent", "cursor"];
 const CLAUDE_ALIASES = ["claude"];
 
 export async function probeSetup(
@@ -771,6 +974,15 @@ export async function probeSetup(
     label: "Agent",
     detail: `${via}${exec.demoFallbacks ? " · demo fallbacks are still on" : ""}`,
   });
+
+  if (step.kind === "webllm") {
+    checks.push({
+      ok: false,
+      label: "WebLLM",
+      detail: "In-browser WebGPU engine — use Test WebLLM in Settings. The server cannot run it.",
+    });
+    return { ok: false, via, text: "", error: "WebLLM is client-only", checks };
+  }
 
   if (step.kind === "studio" || step.kind === "cis") {
     const base = exec.studioBaseUrl.trim();
@@ -829,7 +1041,7 @@ export async function probeSetup(
     }
   } else if (options?.mcp && (step.kind === "cursor" || step.kind === "claude")) {
     const located = await locateCli(step.kind, exec);
-    pushCliChecks(checks, located);
+    await pushCliChecks(checks, located);
     checks.push(...(await probeMcp(step.kind, located, exec, options.mcpServer)));
     if (mode === "run" && located.found) {
       const mcpPrompt =
@@ -903,7 +1115,7 @@ export async function probeSetup(
     }
   } else if (step.kind === "cursor" || step.kind === "claude") {
     const located = await locateCli(step.kind, exec);
-    const present = pushCliChecks(checks, located);
+    const present = await pushCliChecks(checks, located);
     if (located.found) {
       const ver = await runVersion(located.found.path);
       checks.push({
@@ -954,19 +1166,29 @@ export async function startAgentTest(opts: {
   log: string;
 }> {
   const exec = resolveExecution(opts.execution);
+  const span = startCall("exec.test", {
+    stepAgent: opts.stepAgent ?? "inherit",
+    mode: opts.mode ?? "connect",
+    mcp: Boolean(opts.mcp),
+  });
   const probe = await probeSetup(opts.execution, opts.stepAgent, {
     ...opts,
     mode: "connect",
   });
   if (opts.mode !== "run" && !opts.mcp) {
+    if (probe.ok) span.ok({ via: probe.via, phase: "connect" });
+    else span.fail(probe.error || probe.text, { via: probe.via, phase: "connect" });
     return { ...probe, log: probe.text };
   }
   const step = resolveStep({ agent: opts.stepAgent ?? "inherit" }, exec);
   if (step.kind !== "cursor" && step.kind !== "claude") {
+    if (probe.ok) span.ok({ via: probe.via, kind: step.kind });
+    else span.fail(probe.error || probe.text, { via: probe.via, kind: step.kind });
     return { ...probe, log: probe.text };
   }
   const located = await locateCli(step.kind, exec);
   if (!located.found) {
+    span.fail(probe.error || `${step.label} CLI not found`, { via: probe.via });
     return { ...probe, log: probe.text };
   }
   const prompt = (opts.prompt || "Reply with exactly: pong").trim();
@@ -1010,6 +1232,9 @@ export async function startAgentTest(opts: {
         detail: ok ? log.slice(0, 800) : explainCliFailure(log || `exit ${raw.code}`),
       },
     ];
+    span.log.debug("spawn", { bin: located.found.path, args: args.join(" "), code: raw.code });
+    if (ok && probe.ok) span.ok({ via: step.label, chars: log.length });
+    else span.fail(ok ? probe.error || probe.text : explainCliFailure(log), { via: step.label, code: raw.code });
     return {
       ok: ok && probe.ok,
       via: step.label,
@@ -1019,6 +1244,7 @@ export async function startAgentTest(opts: {
       log,
     };
   }
+  span.log.debug("terminal", { bin: located.found.path, args: args.join(" ") });
   const session = await startMacSession(
     workspaceOf(exec),
     located.found.path,
@@ -1028,6 +1254,7 @@ export async function startAgentTest(opts: {
       title: formatKindlingTerminalTitle(opts.mcp ? `${step.label} MCP test` : `${step.label} test`),
     },
   );
+  span.ok({ via: step.label, sessionDir: session.dir, pending: true });
   return {
     ok: probe.ok,
     via: step.label,
@@ -1049,16 +1276,22 @@ export async function pollAgentTest(
 }> {
   const snap = await readSession(sessionDir);
   const age = Date.now() - snap.startedAt;
+  const pollLog = createLogger("exec.poll", { sessionDir });
   if (sessionShouldStop(snap.log)) {
-    return { done: true, ok: false, log: snap.log, error: explainCliFailure(snap.log) };
+    const error = explainCliFailure(snap.log);
+    pollLog.error("fail", { error, ageMs: age });
+    return { done: true, ok: false, log: snap.log, error };
   }
   if (snap.exitCode !== null) {
     const ok = snap.exitCode === 0 && !isNoiseLog(snap.log);
+    const error = ok ? undefined : explainCliFailure(snap.log) || `exit ${snap.exitCode}`;
+    if (ok) pollLog.info("ok", { code: snap.exitCode, chars: snap.log.length, ageMs: age });
+    else pollLog.error("fail", { error, code: snap.exitCode, ageMs: age });
     return {
       done: true,
       ok,
       log: snap.log,
-      error: ok ? undefined : explainCliFailure(snap.log) || `exit ${snap.exitCode}`,
+      error,
     };
   }
   if (opts?.longSession) {
@@ -1072,25 +1305,31 @@ export async function pollAgentTest(
       notifyMcpSeenAt,
     });
     if (verdict.done) {
+      if (verdict.ok) pollLog.info("ok", { ageMs: age, chars: snap.log.length, columnId: opts.columnId });
+      else pollLog.error("fail", { error: verdict.error, ageMs: age, columnId: opts.columnId });
       return { done: true, ok: verdict.ok, log: snap.log, error: verdict.error };
     }
     return { done: false, ok: true, log: snap.log };
   }
   if (age > 12000 && isNoiseLog(snap.log)) {
+    const error =
+      "Cursor stalled on retrieval (no model reply after 12s). That is the agent, not Kindling. Run `agent -p --trust -f 'Reply with exactly: pong'` in Terminal to confirm.";
+    pollLog.error("fail", { error, ageMs: age });
     return {
       done: true,
       ok: false,
       log: snap.log,
-      error:
-        "Cursor stalled on retrieval (no model reply after 12s). That is the agent, not Kindling. Run `agent -p --trust -f 'Reply with exactly: pong'` in Terminal to confirm.",
+      error,
     };
   }
   if (age > 40000) {
+    const error = "Timed out after 40s. Check the Terminal window — Kindling will not wait forever.";
+    pollLog.error("fail", { error, ageMs: age });
     return {
       done: true,
       ok: false,
       log: snap.log,
-      error: "Timed out after 40s. Check the Terminal window — Kindling will not wait forever.",
+      error,
     };
   }
   return { done: false, ok: true, log: snap.log };

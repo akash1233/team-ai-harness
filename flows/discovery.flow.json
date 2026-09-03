@@ -48,7 +48,8 @@
       "id": "prep-agenda",
       "label": "Agenda",
       "role": "prompt",
-      "agent": "cursor",
+      "agent": "webllm",
+      "webllmProfile": "fast",
       "writes": ["agenda", "prev"],
       "maxTokens": 1100,
       "prompt": {
@@ -84,7 +85,8 @@
       "id": "synthesize",
       "label": "Spec",
       "role": "prompt",
-      "agent": "studio",
+      "agent": "webllm",
+      "webllmProfile": "fast",
       "writes": ["spec", "prev"],
       "maxTokens": 1400,
       "prompt": {

@@ -79,7 +79,7 @@ export function ConnectTab() {
   return (
     <div className="flex flex-col gap-6">
       <p className="text-sm text-muted">
-        Point Kindling at your org Jira and GitHub Enterprise with a PAT. Sync issues and repos, then drop a Jira key or repo onto a pipeline ticket — that becomes <span className="font-mono">{"{{jira.key}}"}</span> / <span className="font-mono">{"{{repo}}"}</span> for every later stage.
+        Point Kindling at your org Jira and GitHub Enterprise with a PAT. Sync issues and repos, then drop a Jira key or repo onto a pipeline ticket — that becomes <span className="font-mono">{"{{jira.key}}"}</span> / <span className="font-mono">{"{{repo}}"}</span> for every later stage. In-browser model status is on the <span className="font-medium text-fg">WebLLM</span> tab, not here.
       </p>
 
       <section className="flex flex-col gap-3 rounded-md border border-border p-3">

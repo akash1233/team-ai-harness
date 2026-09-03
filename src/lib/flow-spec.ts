@@ -1,7 +1,9 @@
 import discoveryFlowJson from "../../flows/discovery.flow.json" with { type: "json" };
+import { isAgentKind } from "./agents.ts";
 import { DISCOVERY_FLOW_ID } from "./columns.ts";
 import { buildContext, interpolate, mentionedKeys } from "./flow-context.ts";
-import type { TeamDoc, Ticket } from "./types.ts";
+import type { StepAgent, TeamDoc, Ticket, WebllmProfile } from "./types.ts";
+import { isWebllmProfile } from "./webllm.ts";
 
 export type FlowStagePrompt = {
   system?: string;
@@ -13,6 +15,7 @@ export type FlowStageSpec = {
   label: string;
   role: string;
   agent?: string;
+  webllmProfile?: string;
   writes?: string[];
   maxTokens?: number;
   prompt?: FlowStagePrompt;
@@ -37,6 +40,21 @@ export function clearFlowSpecCache(): void {}
 
 export function getFlowStage(stageId: string, flow: FlowSpec = loadDiscoveryFlowSpec()): FlowStageSpec | undefined {
   return flow.stages.find((s) => s.id === stageId);
+}
+
+/** JSON-backed stage agent (manual | cursor | claude | studio | cis | webllm). */
+export function flowStageAgent(stageId: string, flow: FlowSpec = loadDiscoveryFlowSpec()): StepAgent | undefined {
+  const agent = getFlowStage(stageId, flow)?.agent;
+  if (agent === "manual" || isAgentKind(agent ?? "")) return agent as StepAgent;
+  return undefined;
+}
+
+export function flowStageWebllmProfile(
+  stageId: string,
+  flow: FlowSpec = loadDiscoveryFlowSpec(),
+): WebllmProfile | undefined {
+  const profile = getFlowStage(stageId, flow)?.webllmProfile;
+  return isWebllmProfile(profile) ? profile : undefined;
 }
 
 export function listFlowVariables(flow: FlowSpec = loadDiscoveryFlowSpec()): Record<string, string> {

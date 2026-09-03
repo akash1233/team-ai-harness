@@ -6,6 +6,7 @@ import {
   BLOCKED_COLUMN_ID,
   DISCOVERY_FLOW_ID,
   DONE_COLUMN_ID,
+  FILE_JIRA_COLUMN_ID,
   FRY_COLUMN_ID,
   IDEATION_COLUMN_ID,
   SEND_SLACK_COLUMN_ID,
@@ -29,11 +30,12 @@ import {
 } from "./team-config";
 import { stageOutputFromLog } from "./cli-session";
 import { harvestVars, harvestBriefVars, harvestNotifyVars, outputVarName, readManualOutput, syncNotifyPreviewVars } from "./flow-context";
-import { isManualStep } from "./agents";
+import { isManualStep, resolveStep } from "./agents";
 import { promptIdForColumn, resolveStagePrompt, unbindJiraKey } from "./prompts";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
-import { extractGrill, extractPlan, runDiscoveryAgent, type StagePayload } from "./discovery-agent";
+import { extractGrill, extractPlan, runDiscoveryAgent, type AgentResult, type StagePayload } from "./discovery-agent";
+import { createLogger } from "./logger";
 
 type BoardState = {
   tickets: Ticket[];
@@ -45,6 +47,8 @@ type BoardState = {
   promptColumnId: string | null;
   activeMemberId: string;
   hydrated: boolean;
+  appConsole: string[];
+  appendAppConsole: (line: string) => void;
   hydrate: () => void;
   persist: () => void;
   select: (id: string | null) => void;
@@ -156,6 +160,50 @@ function issuesForKeys(issues: LinkedJira[], keys: string[]): LinkedJira[] {
   return issues.filter((issue) => wanted.has(issue.key.toUpperCase()));
 }
 
+async function invokeStageAgent(
+  get: () => BoardState,
+  opts: {
+    ticket: Ticket;
+    columnId: string;
+    grillSubmit?: boolean;
+    promptOverride?: StagePayload;
+    onProgress?: (text: string) => void;
+  },
+): Promise<AgentResult> {
+  const config = get().config;
+  const liveCol = columnById(opts.columnId, config.columns);
+  const resolved = resolveStagePrompt(liveCol, config.prompts, config.docs);
+  const payload = {
+    ticket: opts.ticket,
+    columnId: opts.columnId,
+    grillSubmit: opts.grillSubmit,
+    promptId: resolved.studioPromptId,
+    execution: config.execution,
+    stepAgent: liveCol?.agent,
+    docs: resolved.docs,
+    jira: config.connectors.jira,
+    jiraKeys: resolved.jiraKeys,
+    jiraIssues: issuesForKeys(config.connectors.issues, resolved.jiraKeys),
+    columns: config.columns,
+    promptOverride: opts.promptOverride,
+  };
+  const step = resolveStep(liveCol, config.execution);
+  createLogger("exec.stage").info("dispatch", {
+    ticket: opts.ticket.key,
+    columnId: opts.columnId,
+    kind: step.kind,
+    via: step.label,
+  });
+  if (opts.columnId !== FILE_JIRA_COLUMN_ID && step.kind === "webllm") {
+    if (typeof window === "undefined") {
+      return { ok: false, error: "WebLLM runs in this browser tab, not on the server.", via: "WebLLM" };
+    }
+    const { runWebllmStage } = await import("./webllm-run");
+    return runWebllmStage({ ...payload, onProgress: opts.onProgress });
+  }
+  return runDiscoveryAgent({ data: payload });
+}
+
 function pushFlowRun(get: () => BoardState, set: (p: Partial<BoardState>) => void, run: Omit<PipelineRun, "id">) {
   const entry: PipelineRun = { ...run, id: uid("run") };
   set({ flowRuns: [entry, ...get().flowRuns].slice(0, 250) });
@@ -192,6 +240,15 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   promptColumnId: null,
   activeMemberId: "m-maya",
   hydrated: false,
+  appConsole: [],
+
+  appendAppConsole: (line) => {
+    const text = line.trim();
+    if (!text) return;
+    const prev = get().appConsole;
+    if (prev[prev.length - 1] === text) return;
+    set({ appConsole: [...prev, text].slice(-500) });
+  },
 
   hydrate: () => {
     if (typeof window === "undefined") return;
@@ -329,6 +386,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       selectedId: null,
       activeStageId: start,
       promptColumnId: null,
+      appConsole: [],
     });
     get().persist();
   },
@@ -454,13 +512,33 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   runTicket: async (id, promptOverride) => {
     const ticket = get().tickets.find((t) => t.id === id);
-    if (!ticket || ticket.status === "executing") return;
+    if (!ticket) return;
+    if (ticket.status === "executing") {
+      createLogger("exec.stage").warn("skip", {
+        ticket: ticket.key,
+        columnId: ticket.columnId,
+        reason: "already executing",
+      });
+      return;
+    }
     const col = columnById(ticket.columnId, get().config.columns);
     if (!col) return;
 
     if (isManualStep(col)) {
       const output = readManualOutput(ticket, col);
-      if (!output) return;
+      if (!output) {
+        createLogger("exec.stage").info("skip", {
+          ticket: ticket.key,
+          columnId: col.id,
+          reason: "manual stage empty — paste notes, then Save",
+        });
+        return;
+      }
+      createLogger("exec.stage").info("manual", {
+        ticket: ticket.key,
+        columnId: col.id,
+        chars: output.length,
+      });
       set({
         tickets: withTicket(get().tickets, id, (t) => ({
           ...t,
@@ -498,21 +576,15 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const latest = get().tickets.find((t) => t.id === id);
       if (!latest) return;
       const liveCol = columnById(latest.columnId, get().config.columns);
-      const resolved = resolveStagePrompt(liveCol, get().config.prompts, get().config.docs);
-      const result = await runDiscoveryAgent({
-        data: {
-          ticket: latest,
-          columnId: latest.columnId,
-          promptId: resolved.studioPromptId,
-          execution: get().config.execution,
-          stepAgent: liveCol?.agent,
-          docs: resolved.docs,
-          jira: get().config.connectors.jira,
-          jiraKeys: resolved.jiraKeys,
-          jiraIssues: issuesForKeys(get().config.connectors.issues, resolved.jiraKeys),
-          columns: get().config.columns,
-          promptOverride,
-        },
+      const step = resolveStep(liveCol, get().config.execution);
+      if (step.kind === "webllm") {
+        set({ tickets: withTicket(get().tickets, id, { liveLog: `Loading ${step.label}…` }) });
+      }
+      const result = await invokeStageAgent(get, {
+        ticket: latest,
+        columnId: latest.columnId,
+        promptOverride,
+        onProgress: (text) => get().patchLiveLog(id, text),
       });
 
       if (!result.ok) {
@@ -584,6 +656,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           return {
             ...t,
             status: "idle",
+            liveLog: step.kind === "webllm" ? undefined : t.liveLog,
             spend: Math.round((t.spend + spendDelta) * 100) / 100,
             runId: result.runId || t.runId,
             outputs:
@@ -789,21 +862,15 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const latest = get().tickets.find((t) => t.id === id);
       if (!latest) return;
       const liveCol = columnById(FRY_COLUMN_ID, get().config.columns);
-      const resolved = resolveStagePrompt(liveCol, get().config.prompts, get().config.docs);
-      const result = await runDiscoveryAgent({
-        data: {
-          ticket: latest,
-          columnId: FRY_COLUMN_ID,
-          grillSubmit: true,
-          promptId: resolved.studioPromptId,
-          execution: get().config.execution,
-          stepAgent: liveCol?.agent,
-          docs: resolved.docs,
-          jira: get().config.connectors.jira,
-          jiraKeys: resolved.jiraKeys,
-          jiraIssues: issuesForKeys(get().config.connectors.issues, resolved.jiraKeys),
-          columns: get().config.columns,
-        },
+      const step = resolveStep(liveCol, get().config.execution);
+      if (step.kind === "webllm") {
+        set({ tickets: withTicket(get().tickets, id, { liveLog: `Loading ${step.label}…` }) });
+      }
+      const result = await invokeStageAgent(get, {
+        ticket: latest,
+        columnId: FRY_COLUMN_ID,
+        grillSubmit: true,
+        onProgress: (text) => get().patchLiveLog(id, text),
       });
       if (!result.ok) {
         get().failTicket(id, result.error, FRY_COLUMN_ID, result.via, result.input);
@@ -820,7 +887,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
             ? "Fryme complete"
             : "Grill round",
         input: result.input,
-        body: result.text,
+        body: stageOutputFromLog(result.text),
         via: result.via,
         ok: true,
         spend: spendDelta,
@@ -848,12 +915,13 @@ export const useBoardStore = create<BoardState>((set, get) => ({
                   },
                 ]
               : t.grillRounds;
-          const conclusions = result.grill?.frontierEmpty ? result.text : t.outputs[FRY_COLUMN_ID];
+          const conclusions = result.grill?.frontierEmpty ? stageOutputFromLog(result.text) : t.outputs[FRY_COLUMN_ID];
           const vars = { ...t.vars };
           if (conclusions) vars.grill = conclusions;
           return {
             ...t,
             status: "idle",
+            liveLog: step.kind === "webllm" ? undefined : t.liveLog,
             spend: Math.round((t.spend + spendDelta) * 100) / 100,
             grillRounds: nextRounds,
             fryComplete: Boolean(result.grill?.frontierEmpty),

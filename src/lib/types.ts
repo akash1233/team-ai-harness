@@ -27,6 +27,8 @@ export type PricingConfig = {
   cursor: AgentRates;
   studio: AgentRates;
   cis: AgentRates;
+  /** Always $0 — in-browser WebGPU. Present so ratesFor is total. */
+  webllm?: AgentRates;
 };
 
 export type TokenUsage = {
@@ -37,9 +39,11 @@ export type TokenUsage = {
 
 export type ExecutionProvider = "local" | "studio" | "cis";
 export type LocalAgent = "cursor" | "claude";
-export type AgentKind = "cursor" | "claude" | "studio" | "cis";
+export type AgentKind = "cursor" | "claude" | "studio" | "cis" | "webllm";
 export type AgentTarget = "local" | "remote";
 export type StepAgent = "inherit" | "manual" | AgentKind;
+/** In-browser WebLLM size/speed tier. Workspace default; a stage can override. */
+export type WebllmProfile = "fast" | "balanced" | "quality";
 
 export type ExecutionConfig = {
   defaultAgent: AgentKind;
@@ -78,6 +82,12 @@ export type ExecutionConfig = {
    * dev container — leave off. Print/ask only.
    */
   fullAgentMode?: boolean;
+  /** WebLLM size/speed tier when a stage is pinned to WebLLM or Inherit. */
+  webllmProfile?: WebllmProfile;
+  /** Optional MLC model id; overrides the profile's default model. */
+  webllmModelId?: string;
+  /** Extra catalog models the operator pulled besides Fast/Balanced/Quality. */
+  webllmExtraModelIds?: string[];
   /** @deprecated hydrated from older workspaces */
   provider?: ExecutionProvider;
   /** @deprecated hydrated from older workspaces */
@@ -170,6 +180,8 @@ export type WorkflowColumn = {
   promptTemplate?: string;
   promptId?: string;
   agent?: StepAgent;
+  /** WebLLM Fast/Balanced/Quality override when this stage runs WebLLM. */
+  webllmProfile?: WebllmProfile;
   /** Variable name this stage publishes, e.g. spec — usable later as {{spec}}. */
   outputKey?: string;
   /** Library prompt this stage runs. */

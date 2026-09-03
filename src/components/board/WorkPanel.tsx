@@ -9,6 +9,7 @@ import { buildContext, outputVarName } from "@/lib/flow-context";
 import { flowStageMentionedKeys, getFlowStage } from "@/lib/flow-spec";
 import { formatSpend } from "@/lib/format";
 import { isManualStep, resolveStep } from "@/lib/agents";
+import { stagePurpose } from "@/lib/stage-purpose";
 import { formatGrillRecord } from "@/lib/grill";
 import { GrillRoom } from "@/components/studio/GrillRoom";
 import { RunLog } from "@/components/studio/RunLog";
@@ -31,16 +32,13 @@ export function WorkPanel() {
       <div className="flex items-start gap-2 border-b border-border px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="font-mono text-micro text-subtle">{ticket.key}</p>
-          <h2 className="font-serif text-lg font-medium leading-snug tracking-tight">{ticket.title}</h2>
-          <p className="mt-1 text-micro uppercase tracking-wider text-muted">
-            {col?.name ?? ticket.columnId}
-            {config.showSpend ? (
-              <>
-                {" · "}
-                <span className="font-mono tabular-nums normal-case tracking-normal">{formatSpend(ticket.spend)}</span>
-              </>
-            ) : null}
-          </p>
+          <h2 className="font-serif text-lg font-medium leading-snug tracking-tight">
+            {col?.label || col?.name || "Stage"}
+          </h2>
+          <p className="mt-1 text-sm text-muted">{col ? stagePurpose(col) : ""}</p>
+          {config.showSpend ? (
+            <p className="mt-1 font-mono text-micro tabular-nums text-subtle">{formatSpend(ticket.spend)}</p>
+          ) : null}
         </div>
         <button
           type="button"
@@ -53,7 +51,7 @@ export function WorkPanel() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {ticket.columnId !== "ideation" && ticket.description ? (
-          <p className="mb-4 text-sm leading-relaxed text-muted">{ticket.description}</p>
+          <p className="mb-4 text-2xs leading-relaxed text-subtle">{ticket.description}</p>
         ) : null}
         {ticket.status === "blocked" && ticket.blockedReason ? (
           <pre className="mb-4 overflow-auto whitespace-pre-wrap rounded-md border border-danger/50 bg-danger/5 p-3 font-mono text-2xs text-danger">

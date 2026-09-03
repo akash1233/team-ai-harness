@@ -4,6 +4,7 @@ import { cn } from "@/lib/cn";
 import { useBoardStore } from "@/lib/board-store";
 import { DISCOVERY_FLOW_ID, BLOCKED_COLUMN_ID } from "@/lib/columns";
 import { isManualStep, resolveStep, stepBadge } from "@/lib/agents";
+import { stagePurpose } from "@/lib/stage-purpose";
 import { ExecutionTrail } from "./ExecutionTrail";
 import { TicketNote } from "./TicketNote";
 
@@ -29,10 +30,6 @@ export function PipelineBoard() {
           const lastRun = inFlow
             .flatMap((t) => t.agentResponses.filter((r) => r.columnId === col.id))
             .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
-          const lastOutput =
-            lastRun?.body ||
-            inFlow.map((t) => t.outputs[col.id]).find((v) => v?.trim()) ||
-            "";
           const step = resolveStep(col, execution);
           const badge = stepBadge(col, execution);
           const failed =
@@ -83,16 +80,14 @@ export function PipelineBoard() {
                     {here.length}
                   </span>
                 </div>
-                {col.promptTemplate ? (
-                  <p className="mt-2 text-2xs leading-relaxed text-muted">{col.promptTemplate}</p>
-                ) : null}
+                <p className="mt-2 text-2xs leading-relaxed text-muted">{stagePurpose(col)}</p>
                 {lastRun ? (
-                  <p className={cn("mt-2 text-micro", lastRun.ok === false ? "text-danger" : "text-muted")}>
-                    Last: {lastRun.ok === false ? "failed" : lastRun.summary}
+                  <p className={cn("mt-2 text-micro", lastRun.ok === false ? "text-danger" : "text-subtle")}>
+                    {lastRun.ok === false ? "Last run failed" : "Last run ok"}
                     {lastRun.via ? ` · ${lastRun.via}` : ""}
                   </p>
                 ) : (
-                  <p className="mt-2 text-micro text-subtle">No runs on this step yet.</p>
+                  <p className="mt-2 text-micro text-subtle">Not run yet</p>
                 )}
                 {runnable ? (
                   <Button
@@ -100,7 +95,7 @@ export function PipelineBoard() {
                     size="md"
                     className="mt-3 w-full"
                     disabled={busy}
-                    title={step.manual ? "Save human input for this stage" : `Run ${step.label} — creates a ticket if this column is empty`}
+                    title={step.manual ? "Save human input for this stage" : `Run ${step.label}`}
                     onClick={() => {
                       setActiveStage(col.id);
                       void runColumn(col.id);
@@ -110,19 +105,10 @@ export function PipelineBoard() {
                     {busy ? "Running…" : here.length === 0 ? `Start · ${step.label}` : step.manual ? "Save & continue" : `Run ${step.label}`}
                   </Button>
                 ) : null}
-                {runnable && here.length === 0 ? (
-                  <p className="mt-2 text-2xs text-muted">Start here. Terminal opens; the last reply is the stage output.</p>
-                ) : null}
               </header>
               <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
                 {here.length === 0 ? (
-                  lastOutput ? (
-                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-sm border border-border bg-inset p-2 text-2xs text-fg">
-                      {lastOutput}
-                    </pre>
-                  ) : (
-                    <p className="text-2xs text-subtle">Drop a ticket here.</p>
-                  )
+                  <p className="text-2xs text-subtle">No tickets on this stage.</p>
                 ) : (
                   here.map((ticket) => (
                     <TicketNote

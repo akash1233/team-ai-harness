@@ -5,6 +5,7 @@
  *
  * silent < error < warn < info < debug
  */
+import { emitAppConsole } from "./app-console.ts";
 
 export const LOG_LEVELS = ["silent", "error", "warn", "info", "debug"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
@@ -181,12 +182,7 @@ function write(level: EmitLevel, scope: string, msg: string, fields?: LogFields)
   if (buffer.length > BUFFER_CAP) buffer.splice(0, buffer.length - BUFFER_CAP);
   emitToConsole(level, rec.line);
   for (const listener of listeners) listener(rec);
-  const sink = (globalThis as typeof globalThis & { __kindlingAppConsole?: (line: string) => void }).__kindlingAppConsole;
-  try {
-    sink?.(rec.line);
-  } catch {
-    /* UI not mounted */
-  }
+  emitAppConsole(rec.line);
   const persist = store().persist;
   if (typeof window !== "undefined" && persist) void persist([rec.line]);
   return rec;
@@ -201,9 +197,10 @@ export function subscribeLogs(listener: (rec: LogRecord) => void): () => void {
   };
 }
 
-/** Merge browser WebLLM lines into the server ring buffer (no second console emit). */
+/** Merge browser WebLLM lines into the server ring buffer and print to `npm run dev`. */
 export function ingestLogLines(lines: string[]): void {
   const { buffer } = store();
+  const onServer = typeof window === "undefined";
   for (const line of lines) {
     const text = line.trim();
     if (!text) continue;
@@ -217,6 +214,10 @@ export function ingestLogLines(lines: string[]): void {
     };
     buffer.push(rec);
     if (buffer.length > BUFFER_CAP) buffer.splice(0, buffer.length - BUFFER_CAP);
+    if (onServer) {
+      const one = text.split("\n")[0] ?? "";
+      if (one.startsWith("[kindling]")) process.stdout.write(`${one.length > 400 ? `${one.slice(0, 400)}…` : one}\n`);
+    }
   }
 }
 

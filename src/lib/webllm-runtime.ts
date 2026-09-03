@@ -1,4 +1,4 @@
-export type WebllmRuntimePhase = "queued" | "load" | "generate" | "error";
+export type WebllmRuntimePhase = "queued" | "load" | "generate" | "done" | "error";
 
 export type WebllmRuntimeJob = {
   id: string;
@@ -21,6 +21,7 @@ export type WebllmJobMeta = {
 };
 
 let seq = 0;
+let doneTimer: ReturnType<typeof setTimeout> | null = null;
 let state: WebllmRuntimeState = { active: null, queue: [] };
 const listeners = new Set<() => void>();
 
@@ -32,14 +33,24 @@ export function getWebllmRuntime(): WebllmRuntimeState {
   return { active: state.active, queue: state.queue.slice() };
 }
 
+/** Download bar never reads 100% until the job is actually done. */
+export function loadDisplayPct(mlcPct?: number): number | undefined {
+  if (mlcPct == null) return undefined;
+  return Math.min(90, Math.max(0, mlcPct));
+}
+
 /** Short copy for the board. Detail belongs in App log. */
-export function webllmPublicStatus(job: WebllmRuntimeJob | null): { label: string; pct?: number } {
+export function webllmPublicStatus(job: WebllmRuntimeJob | null): { label: string; pct?: number; indeterminate?: boolean } {
   if (!job) return { label: "" };
-  if (job.phase === "queued") return { label: "Waiting" };
-  if (job.phase === "load") return { label: "Downloading", pct: job.pct };
-  if (job.phase === "generate") return { label: "Writing" };
+  if (job.phase === "queued") return { label: "Waiting", indeterminate: true };
+  if (job.phase === "load") {
+    const pct = loadDisplayPct(job.pct);
+    return { label: pct != null && pct >= 90 ? "Preparing" : "Downloading", pct };
+  }
+  if (job.phase === "generate") return { label: "Writing", indeterminate: true };
+  if (job.phase === "done") return { label: "Done", pct: 100 };
   if (job.phase === "error") return { label: "Couldn't finish" };
-  return { label: "Working" };
+  return { label: "Working", indeterminate: true };
 }
 
 export function subscribeWebllmRuntime(listener: () => void): () => void {
@@ -83,19 +94,41 @@ export function updateWebllmJob(id: string, patch: Partial<Omit<WebllmRuntimeJob
 }
 
 export function finishWebllmJob(id: string): void {
-  if (state.active?.id === id) {
-    const [head, ...rest] = state.queue;
+  if (doneTimer) {
+    clearTimeout(doneTimer);
+    doneTimer = null;
+  }
+  if (state.active?.id !== id) {
+    state = { ...state, queue: state.queue.filter((job) => job.id !== id) };
+    emit();
+    return;
+  }
+  const [head, ...rest] = state.queue;
+  if (head) {
     state = {
-      active: head ? { ...head, phase: head.phase === "queued" ? "load" : head.phase } : null,
+      active: { ...head, phase: head.phase === "queued" ? "load" : head.phase },
       queue: rest,
     };
-  } else {
-    state = { ...state, queue: state.queue.filter((job) => job.id !== id) };
+    emit();
+    return;
   }
+  state = { active: { ...state.active, phase: "done", pct: 100, text: "Done" }, queue: [] };
   emit();
+  const finished = id;
+  doneTimer = setTimeout(() => {
+    doneTimer = null;
+    if (state.active?.id === finished && state.active.phase === "done") {
+      state = { active: null, queue: state.queue };
+      emit();
+    }
+  }, 900);
 }
 
 export function resetWebllmRuntime(): void {
+  if (doneTimer) {
+    clearTimeout(doneTimer);
+    doneTimer = null;
+  }
   seq = 0;
   state = { active: null, queue: [] };
   emit();

@@ -36,6 +36,7 @@ import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
 import { extractGrill, extractPlan, runDiscoveryAgent, type AgentResult, type StagePayload } from "./discovery-agent";
 import { createLogger } from "./logger";
+import { setAppConsoleSink } from "./app-console";
 
 type BoardState = {
   tickets: Ticket[];
@@ -1492,3 +1493,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     get().persist();
   },
 }));
+
+if (typeof window !== "undefined") {
+  setAppConsoleSink((line) => useBoardStore.getState().appendAppConsole(line));
+}

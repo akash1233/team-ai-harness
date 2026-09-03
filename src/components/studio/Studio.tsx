@@ -37,11 +37,6 @@ export function Studio() {
 
   useEffect(() => {
     ensureLogFlush();
-    const g = window as Window & { __kindlingAppConsole?: (line: string) => void };
-    g.__kindlingAppConsole = (line) => useBoardStore.getState().appendAppConsole(line);
-    return () => {
-      delete g.__kindlingAppConsole;
-    };
   }, []);
 
   useEffect(() => {

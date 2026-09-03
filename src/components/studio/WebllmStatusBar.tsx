@@ -19,7 +19,8 @@ export function WebllmStatusBar() {
   const status = webllmPublicStatus(active);
   const stage = active?.columnLabel || "WebLLM";
   const pct = status.pct;
-  const width = Math.max(4, Math.min(100, pct ?? (active?.phase === "generate" ? 100 : 8)));
+  const indeterminate = Boolean(status.indeterminate);
+  const width = pct != null ? Math.max(2, Math.min(100, pct)) : 8;
 
   return (
     <div
@@ -33,24 +34,17 @@ export function WebllmStatusBar() {
           <span className="text-muted"> · {status.label}</span>
           {active?.ticketKey ? <span className="text-subtle"> · {active.ticketKey}</span> : null}
         </p>
-        {pct != null ? (
+        {pct != null && !indeterminate ? (
           <p className="shrink-0 font-mono text-2xs tabular-nums text-muted">{pct}%</p>
         ) : null}
-        {queue.length > 0 ? (
-          <p className="shrink-0 text-2xs text-subtle">
-            {queue.length} waiting
-          </p>
-        ) : null}
+        {queue.length > 0 ? <p className="shrink-0 text-2xs text-subtle">{queue.length} waiting</p> : null}
       </div>
       <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-inset" aria-hidden>
-        <div
-          className={
-            active?.phase === "queued"
-              ? "h-full w-1/4 animate-pulse rounded-full bg-accent/60"
-              : "h-full rounded-full bg-accent transition-[width] duration-300"
-          }
-          style={active?.phase === "queued" ? undefined : { width: `${width}%` }}
-        />
+        {indeterminate ? (
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-accent" />
+        ) : (
+          <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${width}%` }} />
+        )}
       </div>
     </div>
   );

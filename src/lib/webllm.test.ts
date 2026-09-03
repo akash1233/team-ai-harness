@@ -147,11 +147,16 @@ test("WebLLM runtime queues a second job behind the active download", async () =
   assert.equal(snap.active?.phase, "load");
   assert.equal(snap.queue.length, 0);
   finishWebllmJob(b);
-  assert.equal(getWebllmRuntime().active, null);
-  const { webllmPublicStatus } = await import("./webllm-runtime.ts");
+  assert.equal(getWebllmRuntime().active?.phase, "done");
+  assert.equal(getWebllmRuntime().active?.pct, 100);
+  const { loadDisplayPct, webllmPublicStatus } = await import("./webllm-runtime.ts");
+  assert.equal(loadDisplayPct(100), 90);
   assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "load", pct: 34, text: "shard 2/8" }).label, "Downloading");
   assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "load", pct: 34, text: "shard 2/8" }).pct, 34);
+  assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "load", pct: 100, text: "done?" }).pct, 90);
   assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "generate", text: "token dump" }).label, "Writing");
+  assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "generate", text: "token dump" }).indeterminate, true);
+  assert.equal(webllmPublicStatus({ id: "1", modelId: "x", phase: "done", pct: 100, text: "Done" }).pct, 100);
   resetWebllmRuntime();
 });
 

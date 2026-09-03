@@ -19,6 +19,7 @@ import { resolveWebllmModel, webllmBlockedReason, withoutRuntimeCallbacks } from
 import { runWebllmCompletion, type WebllmProgress } from "./webllm-engine.ts";
 import { clip, startCall } from "./logger.ts";
 import { ensureLogFlush } from "./logger-flush.ts";
+import { emitAppConsole } from "./app-console.ts";
 
 const MAX_INPUT_CHARS = 4000;
 
@@ -36,6 +37,9 @@ export async function runWebllmStage(
 ): Promise<AgentResult> {
   ensureLogFlush();
   const { ticket, columnId, grillSubmit, execution, promptOverride, onProgress } = data;
+  emitAppConsole(
+    `[kindling] ${new Date().toISOString()} INFO  exec.stage webllm columnId=${columnId} ticket=${ticket.key}`,
+  );
   const id = runId();
   const blocked = webllmBlockedReason(columnId);
   const col = columnById(columnId, data.columns);
@@ -78,7 +82,7 @@ export async function runWebllmStage(
     job: { ticketKey: ticket.key, columnLabel: col?.label || columnId },
     onProgress: (p: WebllmProgress) => {
       if (p.phase === "load" || p.phase === "queued") {
-        span.log.info("ui", { phase: p.phase, pct: p.pct, text: p.text });
+        span.log.info("ui", { phase: p.phase, pct: p.pct });
         onProgress?.(p.pct != null ? `Downloading ${p.pct}%` : "Downloading…");
         return;
       }

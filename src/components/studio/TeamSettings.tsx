@@ -954,7 +954,14 @@ function identityLabel(id: string): string {
 }
 
 function mergeLogLines(server: string[], client: string[]): string[] {
-  return [...new Set([...server, ...client])].sort();
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const line of [...client, ...server]) {
+    if (!line || seen.has(line)) continue;
+    seen.add(line);
+    out.push(line);
+  }
+  return out;
 }
 
 function AppConsoleLog({

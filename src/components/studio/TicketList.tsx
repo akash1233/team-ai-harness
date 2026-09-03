@@ -6,6 +6,7 @@ import { columnById, DISCOVERY_FLOW_ID } from "@/lib/columns";
 import { formatSpend } from "@/lib/format";
 import { isManualStep, resolveStep } from "@/lib/agents";
 import { outputVarName } from "@/lib/flow-context";
+import { previewLine, stagePurpose } from "@/lib/stage-purpose";
 import { ExecutionTrail } from "./ExecutionTrail";
 import type { Ticket } from "@/lib/types";
 
@@ -47,7 +48,7 @@ export function TicketList() {
           </p>
           <h1 className="font-serif text-3xl font-medium tracking-tight md:text-4xl">{col?.label || col?.name || "Stage"}</h1>
           <p className="mt-2 max-w-xl text-sm text-muted">
-            This pane is the current stage. Run history below stays for the whole pipeline.
+            {col ? stagePurpose(col) : "Pick a stage from the rail."}
           </p>
         </div>
         {runnable ? (
@@ -104,7 +105,8 @@ function TicketCard({
   const owner = config.members.find((m) => m.id === ticket.ownerId);
   const failed = ticket.status === "blocked";
   const last = ticket.agentResponses.find((r) => r.columnId === stageId) ?? ticket.agentResponses[0];
-  const writes = outputVarName(config.columns.find((c) => c.id === stageId));
+  const stageCol = config.columns.find((c) => c.id === stageId);
+  const writes = outputVarName(stageCol);
   const output =
     ticket.status === "executing"
       ? ""
@@ -112,7 +114,6 @@ function TicketCard({
         ticket.outputs[stageId] ||
         last?.body ||
         "";
-  const vars = Object.entries(ticket.vars ?? {}).filter(([, v]) => v.trim());
   const error = ticket.blockedReason || (last?.ok === false ? last.error || last.body : "");
 
   return (
@@ -144,29 +145,17 @@ function TicketCard({
           </span>
         ) : null}
       </div>
-      <h2 className="mt-2 font-serif text-xl font-medium leading-snug tracking-tight">{ticket.title}</h2>
-      {writes ? <p className="mt-1 font-mono text-2xs text-subtle">{`{{${writes}}}`}</p> : null}
+      <h2 className="mt-2 font-serif text-xl font-medium leading-snug tracking-tight">
+        {stageCol?.label || stageCol?.name || "Stage"}
+      </h2>
+      {stageCol ? <p className="mt-1 text-sm text-muted">{stagePurpose(stageCol)}</p> : null}
       {failed && error ? (
-        <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-danger/40 bg-danger/5 p-2 font-mono text-2xs text-danger">
-          {error}
-        </pre>
+        <p className="mt-3 text-2xs text-danger">{previewLine(error, 120)}</p>
       ) : output ? (
-        <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 text-sm text-fg">
-          {output}
-        </pre>
+        <p className="mt-3 text-sm leading-snug text-muted">{previewLine(output)}</p>
       ) : (
-        <p className="mt-3 text-2xs text-subtle">No output yet for this step.</p>
+        <p className="mt-3 text-2xs text-subtle">No output yet</p>
       )}
-      {vars.length > 0 ? (
-        <ul className="mt-3 flex flex-col gap-1">
-          {vars.map(([k, v]) => (
-            <li key={k} className="text-2xs">
-              <span className="font-mono text-fg">{`{{${k}}}`}</span>
-              <span className="ml-2 text-muted">{v.length > 200 ? `${v.slice(0, 200)}…` : v}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
       <div className="mt-4 flex flex-wrap items-center gap-2 text-2xs text-subtle">
         {ticket.labels.map((l) => (
           <span key={l} className="rounded-full bg-inset px-2 py-0.5 text-muted">

@@ -120,6 +120,13 @@ test("clip flattens whitespace", () => {
   assert.equal(clip("a\n\nb  c"), "a b c");
 });
 
+test("consoleLine keeps a single short kindling status line", async () => {
+  const { consoleLine } = await import("./app-console.ts");
+  const dumped = `[kindling] INFO exec.webllm generate\nSentinel - Bug Bash\nDate: August 28`;
+  assert.equal(consoleLine(dumped), "[kindling] INFO exec.webllm generate");
+  assert.ok(consoleLine(`${"x".repeat(500)}`).endsWith("…"));
+});
+
 test("subscribeLogs and ingestLogLines feed the App log buffer", () => {
   setLogLevel("info");
   clearLogBuffer();

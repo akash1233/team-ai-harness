@@ -8,10 +8,12 @@ import {
   type WebllmColumnRef,
 } from "./webllm.ts";
 import { clip, createLogger, persistRecentLogs, startCall } from "./logger.ts";
+import { emitAppConsole } from "./app-console.ts";
 import { stripThinkBlocks } from "./cli-session.ts";
 import {
   enqueueWebllmJob,
   finishWebllmJob,
+  loadDisplayPct,
   updateWebllmJob,
   type WebllmJobMeta,
 } from "./webllm-runtime.ts";
@@ -88,12 +90,14 @@ export async function ensureWebllmEngine(
     onProgress?.(p);
     if (job?.id) {
       updateWebllmJob(job.id, {
-        phase: p.phase === "generate" ? "generate" : "load",
-        pct: p.pct,
+        phase: p.phase === "generate" ? "generate" : p.phase === "queued" ? "queued" : "load",
+        pct: p.phase === "load" ? loadDisplayPct(p.pct) : p.pct,
         text: p.text,
         modelId,
       });
     }
+    const pct = p.pct != null ? ` pct=${p.pct}` : "";
+    emitAppConsole(`[kindling] ${new Date().toISOString()} INFO  exec.webllm ${p.phase}${pct} modelId=${modelId}`);
   };
 
   if (loaded?.modelId === modelId) return loaded.engine;
@@ -197,7 +201,7 @@ export async function ensureWebllmEngine(
     }
     loaded = { modelId, engine };
     log.info("load.ok", { modelId });
-    note({ phase: "load", modelId, pct: 100, text: `${modelId} ready in this browser.` });
+    note({ phase: "load", modelId, pct: 90, text: `${modelId} ready — starting generation.` });
     return engine;
   })();
   loadQueue = { modelId, promise };

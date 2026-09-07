@@ -32,7 +32,7 @@ import {
 } from "./team-config";
 import { stageOutputFromLog } from "./cli-session";
 import { harvestVars, harvestBriefVars, harvestNotifyVars, harvestReviewVars, outputVarName, readManualOutput, reviewSourceText, syncNotifyPreviewVars } from "./flow-context";
-import { isManualStep, isReviewGate, resolveStep } from "./agents";
+import { isManualStep, isReviewGate, resolveStageCli, resolveStep } from "./agents";
 import { promptIdForColumn, resolveStagePrompt, unbindJiraKey } from "./prompts";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
@@ -1272,7 +1272,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         get().persist();
         return;
       }
-      if (flow.autoRun && (next.role === "prompt" || next.role === "plan") && next.id !== SEND_SLACK_COLUMN_ID) {
+      if (flow.autoRun && (next.role === "prompt" || next.role === "plan") && resolveStageCli(next) !== "tui") {
         get().persist();
         await get().runTicket(id);
         return;

@@ -42,6 +42,8 @@ export type LocalAgent = "cursor" | "claude";
 export type AgentKind = "cursor" | "claude" | "studio" | "cis" | "webllm";
 export type AgentTarget = "local" | "remote";
 export type StepAgent = "inherit" | "manual" | AgentKind;
+/** Cursor/Claude launch: one-shot `-p` vs interactive Terminal TUI. Ignored for WebLLM/manual. */
+export type StageCliMode = "print" | "tui";
 /** In-browser WebLLM size/speed tier. Workspace default; a stage can override. */
 export type WebllmProfile = "fast" | "balanced" | "quality";
 
@@ -180,6 +182,8 @@ export type WorkflowColumn = {
   promptTemplate?: string;
   promptId?: string;
   agent?: StepAgent;
+  /** Cursor/Claude only. Omit = print. */
+  cli?: StageCliMode;
   /** WebLLM Fast/Balanced/Quality override when this stage runs WebLLM. */
   webllmProfile?: WebllmProfile;
   /** Variable name this stage publishes, e.g. spec — usable later as {{spec}}. */

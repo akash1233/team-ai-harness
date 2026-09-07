@@ -36,7 +36,7 @@ export function createDiscoveryFlow(): Flow {
   return {
     id: DISCOVERY_FLOW_ID,
     name: "Discovery",
-    description: "Brief → agenda (WebLLM) → notes → spec (WebLLM) → Grill Me → backlog (Cursor) → Jira.",
+    description: "Brief → agenda (Cursor print) → notes → spec (Cursor print) → Grill Me → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns()),
     autoAdvance: true,
     autoRun: false,
@@ -48,7 +48,7 @@ export function createQuickSpecFlow(): Flow {
   return {
     id: QUICK_SPEC_FLOW_ID,
     name: "Quick spec",
-    description: "Skip agenda and Slack. Brief → spec (WebLLM) → grill → backlog (Cursor) → Jira.",
+    description: "Skip agenda and Slack. Brief → spec (Cursor print) → grill → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns([
       IDEATION_COLUMN_ID,
       SYNTHESIZE_COLUMN_ID,
@@ -190,6 +190,20 @@ export function patchActiveFlow(config: TeamConfig, patch: Partial<Flow>): TeamC
   return applyActiveFlow(next, config.activeFlowId);
 }
 
+/** Saved session columns inherit Discovery JSON `cli` / agent when the JSON moved off WebLLM. Explicit print/tui wins. */
+function fillMissingCli(columns: WorkflowColumn[]): WorkflowColumn[] {
+  const defaults = createDefaultColumns();
+  return columns.map((c) => {
+    const fromJson = defaults.find((d) => d.id === c.id);
+    let next = c;
+    if (c.agent === "webllm" && fromJson?.agent && fromJson.agent !== "webllm") {
+      next = { ...next, agent: fromJson.agent, webllmProfile: fromJson.webllmProfile };
+    }
+    if (next.cli === "print" || next.cli === "tui") return next;
+    return fromJson?.cli ? { ...next, cli: fromJson.cli } : next;
+  });
+}
+
 /** Keep in-memory Pipeline / Prompts / Flows edits for the current app process. */
 export function restoreSessionPipeline(saved: Partial<TeamConfig>): TeamConfig {
   const boot = mergeTeamConfig({ ...saved, flows: undefined, columns: undefined, prompts: undefined });
@@ -198,12 +212,12 @@ export function restoreSessionPipeline(saved: Partial<TeamConfig>): TeamConfig {
   const flows = saved.flows?.length
     ? saved.flows.map((f) => ({
         ...f,
-        columns: f.columns?.length ? f.columns.map((c) => ({ ...c })) : boot.columns.map((c) => ({ ...c })),
+        columns: fillMissingCli(f.columns?.length ? f.columns.map((c) => ({ ...c })) : boot.columns.map((c) => ({ ...c }))),
       }))
     : boot.flows.map((f) =>
         f.id === (saved.activeFlowId ?? boot.activeFlowId) && saved.columns?.length
-          ? { ...f, columns: saved.columns.map((c) => ({ ...c })) }
-          : { ...f, columns: f.columns.map((c) => ({ ...c })) },
+          ? { ...f, columns: fillMissingCli(saved.columns.map((c) => ({ ...c }))) }
+          : { ...f, columns: fillMissingCli(f.columns.map((c) => ({ ...c }))) },
       );
   const activeFlowId =
     saved.activeFlowId && flows.some((f) => f.id === saved.activeFlowId) ? saved.activeFlowId : flows[0]!.id;

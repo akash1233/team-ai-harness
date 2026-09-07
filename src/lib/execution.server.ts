@@ -1,5 +1,5 @@
 import { createDefaultExecution } from "./team-config.ts";
-import { isAgentKind, legacyDefaultAgent, resolveStep } from "./agents.ts";
+import { isAgentKind, legacyDefaultAgent, resolveStageCli, resolveStep } from "./agents.ts";
 import { isWebllmProfile } from "./webllm.ts";
 import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing.ts";
 import {
@@ -24,7 +24,7 @@ import {
   withNonInteractiveFlags,
   withoutFullAgentMode,
 } from "./cli-session.ts";
-import type { AgentKind, ExecutionConfig, StepAgent, TokenUsage } from "./types.ts";
+import type { AgentKind, ExecutionConfig, StageCliMode, StepAgent, TokenUsage } from "./types.ts";
 import { clip, createLogger, startCall } from "./logger.ts";
 
 export type ModelCall = {
@@ -242,13 +242,14 @@ async function invokeCli(
   prompt: string,
   extraArgs: string[] = [],
   timeoutMs?: number,
-  printMode = false,
+  cliMode: StageCliMode = "print",
   terminalTitle?: string,
 ): Promise<{ ok: boolean; text: string; error?: string; via: string; sessionDir?: string; pending?: boolean }> {
   const line = kind === "claude" ? exec.claudeCommand : exec.cursorCommand;
   const { bin, args } = parseCommand(line);
   const via = kind === "claude" ? "Claude" : "Cursor";
-  const call = startCall("exec.cli", { kind, via, printMode });
+  const tui = cliMode === "tui" && process.platform === "darwin";
+  const call = startCall("exec.cli", { kind, via, cliMode, tui });
   const found = kind === "cursor" ? await lookupCursorBin(bin) : await lookupBin(bin);
   if (!found) {
     const error = `${via} CLI \`${bin}\` is not on PATH. Install it, or set a local HTTP URL.`;
@@ -263,8 +264,7 @@ async function invokeCli(
   );
   if (!exec.fullAgentMode) flags = withoutFullAgentMode(flags);
   if (kind === "cursor") flags = withCursorWorkspace(flags, cwd);
-  const longStage =
-    Boolean(exec.runInTerminal) && !printMode && Boolean(exec.fullAgentMode) && process.platform === "darwin";
+  const longStage = tui;
   if (longStage) {
     flags = toInteractiveArgs(flags);
     if (kind === "claude" && !flags.includes("--session-id")) {
@@ -347,8 +347,9 @@ async function callLocalCli(
   prompt: string,
   kind: "cursor" | "claude",
   terminalTitle?: string,
+  cliMode: StageCliMode = "print",
 ): Promise<ModelCall> {
-  const result = await invokeCli(exec, kind, prompt, [], undefined, !exec.fullAgentMode, terminalTitle);
+  const result = await invokeCli(exec, kind, prompt, [], undefined, cliMode, terminalTitle);
   if (result.pending && result.sessionDir) {
     return { ok: true, text: result.text, via: result.via, sessionDir: result.sessionDir, pending: true };
   }
@@ -635,10 +636,12 @@ export async function runModel(opts: {
   execution?: ExecutionConfig;
   promptId?: string;
   stepAgent?: StepAgent;
+  cliMode?: StageCliMode;
   terminalTitle?: string;
 }): Promise<ModelCall> {
   const exec = resolveExecution(opts.execution);
   const step = resolveStep({ agent: opts.stepAgent ?? "inherit" }, exec);
+  const cliMode = resolveStageCli({ cli: opts.cliMode });
   const prompt = [opts.system, opts.user].filter(Boolean).join("\n\n");
   const promptId = opts.promptId || exec.promptId;
   const span = startCall("exec", {
@@ -683,7 +686,7 @@ export async function runModel(opts: {
   if (exec.localHttpUrl.trim()) {
     return cost(await callLocalHttp(exec.localHttpUrl, kind, exec, opts.system, opts.user, opts.maxTokens));
   }
-  return cost(await callLocalCli(exec, prompt, kind, opts.terminalTitle));
+  return cost(await callLocalCli(exec, prompt, kind, opts.terminalTitle, cliMode));
 }
 
 type LocatedCli = {
@@ -769,7 +772,7 @@ async function pingAgent(
     prompt,
     extra,
     Math.min(Math.max(exec.timeoutMs, 20000), 120000),
-    true,
+    "print",
     formatKindlingTerminalTitle(`${via} test`),
   );
   const body = (result.text || result.error || "").slice(0, 800);

@@ -1,4 +1,4 @@
-import type { AgentKind, AgentTarget, ExecutionConfig, StepAgent, WebllmProfile, WorkflowColumn } from "./types.ts";
+import type { AgentKind, AgentTarget, ExecutionConfig, StageCliMode, StepAgent, WebllmProfile, WorkflowColumn } from "./types.ts";
 import { resolveWebllmModel } from "./webllm.ts";
 
 export const AGENT_KINDS: AgentKind[] = ["cursor", "claude", "studio", "cis", "webllm"];
@@ -37,6 +37,25 @@ export function isReviewGate(column?: StepColumnRef | null): boolean {
 export function isRunnableStage(column?: StepColumnRef | null): boolean {
   if (!column || isReviewGate(column)) return false;
   return column.role === "prompt" || column.role === "plan" || isManualStep(column);
+}
+
+export function isStageCliMode(value: unknown): value is StageCliMode {
+  return value === "print" || value === "tui";
+}
+
+/** Cursor/Claude launch. Omit / anything else → print. WebLLM and manual ignore this. */
+export function resolveStageCli(column?: { cli?: StageCliMode | string } | null): StageCliMode {
+  return column?.cli === "tui" ? "tui" : "print";
+}
+
+/** True when this stage actually spawns Cursor or Claude (not WebLLM / manual / gates). */
+export function stageUsesCli(
+  column?: StepColumnRef | null,
+  exec?: ExecutionConfig | null,
+): boolean {
+  if (!column || isManualStep(column) || isReviewGate(column) || column.role === "terminal") return false;
+  const step = resolveStep(column, exec);
+  return !step.manual && (step.kind === "cursor" || step.kind === "claude");
 }
 
 export function legacyDefaultAgent(exec?: Partial<ExecutionConfig> | null): AgentKind | undefined {

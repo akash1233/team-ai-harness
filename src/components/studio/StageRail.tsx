@@ -16,7 +16,7 @@ export function StageRail() {
   return (
     <nav
       aria-label="Pipeline"
-      className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-2 md:h-full md:w-56 md:flex-col md:overflow-y-auto md:border-r md:border-b-0 md:px-3 md:py-4"
+      className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-2 md:h-full md:w-72 md:flex-col md:overflow-y-auto md:border-r md:border-b-0 md:px-3 md:py-4"
     >
       {columns.map((col, i) => {
         const here = inFlow.filter((t) => t.columnId === col.id);
@@ -30,6 +30,7 @@ export function StageRail() {
           <button
             key={col.id}
             type="button"
+            title={col.label}
             onClick={() => setActiveStage(col.id)}
             onDragOver={(e) => {
               e.preventDefault();
@@ -41,7 +42,7 @@ export function StageRail() {
               if (id) moveTicket(id, col.id);
             }}
             className={cn(
-              "flex min-h-11 min-w-36 items-center gap-2 rounded-md px-3 text-left md:min-w-0 md:w-full",
+              "flex min-h-11 min-w-max items-center gap-2 rounded-md px-3 py-2 text-left md:min-w-0 md:w-full",
               active && failed
                 ? "bg-danger text-danger-fg"
                 : active
@@ -52,18 +53,20 @@ export function StageRail() {
               !col.enabled && "opacity-50",
             )}
           >
-            <span className={cn("font-mono text-micro tabular-nums", active ? (failed ? "text-danger-fg/70" : "text-accent-fg/70") : failed ? "text-danger" : "text-subtle")}>
+            <span className={cn("shrink-0 font-mono text-micro tabular-nums", active ? (failed ? "text-danger-fg/70" : "text-accent-fg/70") : failed ? "text-danger" : "text-subtle")}>
               {String(i + 1).padStart(2, "0")}
             </span>
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">{col.label}</span>
+            <span className="min-w-0 flex-1 whitespace-nowrap text-sm font-medium leading-snug md:whitespace-normal md:break-words">
+              {col.label}
+            </span>
             {badge ? (
-              <span className={cn("hidden font-mono text-micro md:inline", active ? (failed ? "text-danger-fg/80" : "text-accent-fg/80") : "text-subtle")}>
+              <span className={cn("hidden shrink-0 font-mono text-micro md:inline", active ? (failed ? "text-danger-fg/80" : "text-accent-fg/80") : "text-subtle")}>
                 {badge}
               </span>
             ) : null}
             <span
               className={cn(
-                "font-mono text-micro tabular-nums",
+                "shrink-0 font-mono text-micro tabular-nums",
                 active ? (failed ? "text-danger-fg/80" : "text-accent-fg/80") : failed ? "text-danger" : "text-subtle",
               )}
             >

@@ -50,8 +50,8 @@
       "id": "prep-agenda",
       "label": "Agenda",
       "role": "prompt",
-      "agent": "webllm",
-      "webllmProfile": "fast",
+      "agent": "cursor",
+      "cli": "print",
       "writes": ["agenda", "prev"],
       "maxTokens": 1100,
       "prompt": {
@@ -70,6 +70,7 @@
       "label": "Notify",
       "role": "prompt",
       "agent": "cursor",
+      "cli": "tui",
       "writes": ["slack_post", "slackMessage", "slack.ts", "prev"],
       "maxTokens": 8000,
       "prompt": {
@@ -88,12 +89,12 @@
       "id": "synthesize",
       "label": "Transcript To Spec",
       "role": "prompt",
-      "agent": "webllm",
-      "webllmProfile": "fast",
+      "agent": "cursor",
+      "cli": "print",
       "writes": ["spec", "prev"],
       "maxTokens": 1400,
       "prompt": {
-        "system": "Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you've already discussed.\n\nThis skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.\n\nThe issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run /setup-matt-pocock-skills.\n\nProcess\nExplore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.\n\nSketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.\n\nCheck with the user that these seams match their expectations.\n\nWrite the spec using the template below, then publish it to the project issue tracker. Apply the ready-for-agent triage label - no need for additional triage.\n\nProblem Statement\nThe problem that the user is facing, from the user's perspective.\n\nSolution\nThe solution to the problem, from the user's perspective.\n\nUser Stories\nA LONG, numbered list of user stories. Each user story should be in the format of:\n\nAs an <role>, I want a <feature>, so that <benefit>\n\n1. As a mobile bank customer, I want to see balance on my accounts, so that I can make better informed decisions about my spending\n\nThis list of user stories should be extremely extensive and cover all aspects of the feature.\n\nImplementation Decisions\nA list of implementation decisions that were made. This can include:\n\nThe modules that will be built/modified\nThe interfaces of those modules that will be modified\nTechnical clarifications from the developer\nArchitectural decisions\nSchema changes\nAPI contracts\nSpecific interactions\nDo NOT include specific file paths or code snippets. They may end up being outdated very quickly.\n\nException: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it within the relevant decision and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.\n\nTesting Decisions\nA list of testing decisions that were made. Include:\n\nA description of what makes a good test (only test external behavior, not implementation details)\nWhich modules will be tested\nPrior art for the tests (i.e. similar types of tests in the codebase)\n\nOut of Scope\nA description of the things that are out of scope for this spec.",
+        "system": "Turn the current conversation into a spec : no interview, just synthesis of what you've already discussed.\n\nThis skill takes the current conversation context and produces a spec. Do NOT interview the user; just synthesize what you already know.\n\nThe issue tracker and triage label vocabulary should have been provided to you.\n\nProcess\nUse the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.\n\nSketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.\n\nCheck with the user that these seams match their expectations.\n\nWrite the spec using the template below, then publish it to the project issue tracker. Apply the ready-for-agent triage label - no need for additional triage.\n\nProblem Statement\nThe problem that the user is facing, from the user's perspective.\n\nSolution\nThe solution to the problem, from the user's perspective.\n\nUser Stories\nA LONG, numbered list of user stories. Each user story should be in the format of:\n\nAs an <role>, I want a <feature>, so that <benefit>\n\n1. As a mobile bank customer, I want to see balance on my accounts, so that I can make better informed decisions about my spending\n\nThis list of user stories should be extremely extensive and cover all aspects of the feature.\n\nImplementation Decisions\nA list of implementation decisions that were made. This can include:\n\nThe modules that will be built/modified\nThe interfaces of those modules that will be modified\nTechnical clarifications from the developer\nArchitectural decisions\nSchema changes\nAPI contracts\nSpecific interactions\nDo NOT include specific file paths or code snippets. They may end up being outdated very quickly.\n\nException: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it within the relevant decision and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.\n\nTesting Decisions\nA list of testing decisions that were made. Include:\n\nA description of what makes a good test (only test external behavior, not implementation details)\nWhich modules will be tested\nPrior art for the tests (i.e. similar types of tests in the codebase)\n\nOut of Scope\nA description of the things that are out of scope for this spec.",
         "user": "Conversation:\n{{transcript}}\n\nJira (if attached):\n{{jira}}"
       }
     },
@@ -108,6 +109,7 @@
       "label": "Fryme Questionarre",
       "role": "prompt",
       "agent": "claude",
+      "cli": "print",
       "writes": ["grill", "prev"],
       "maxTokens": 1100,
       "prompt": {
@@ -126,6 +128,7 @@
       "label": "Plan Write Up - EPIC Stories",
       "role": "plan",
       "agent": "cursor",
+      "cli": "print",
       "writes": ["plan", "prev"],
       "maxTokens": 1600,
       "prompt": {
@@ -144,6 +147,7 @@
       "label": "File planned Jira's ",
       "role": "prompt",
       "agent": "cursor",
+      "cli": "tui",
       "maxTokens": 4000,
       "prompt": {
         "system": "Create Jira issues from the approved plan only. Honor epic/story hierarchy. Do not invent extra scope.",

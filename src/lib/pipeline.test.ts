@@ -36,15 +36,26 @@ function ticket(over: Partial<Ticket> = {}): Ticket {
   };
 }
 
-test("Discovery agents: agenda WebLLM, spec WebLLM, plan Cursor", () => {
+test("Discovery agents: agenda Cursor print, spec Cursor print, plan Cursor", () => {
   const agenda = COLUMNS.find((c) => c.id === PREP_AGENDA_COLUMN_ID);
   const spec = COLUMNS.find((c) => c.id === SYNTHESIZE_COLUMN_ID);
   const plan = COLUMNS.find((c) => c.id === WRITE_PLAN_COLUMN_ID);
-  assert.equal(agenda?.agent, "webllm");
-  assert.equal(agenda?.webllmProfile, "fast");
-  assert.equal(spec?.agent, "webllm");
-  assert.equal(spec?.webllmProfile, "fast");
+  const notify = COLUMNS.find((c) => c.id === "send-slack");
+  const fileJira = COLUMNS.find((c) => c.id === "file-jira");
+  const fry = COLUMNS.find((c) => c.id === "fry");
+  assert.equal(agenda?.agent, "cursor");
+  assert.equal(agenda?.cli, "print");
+  assert.equal(agenda?.webllmProfile, undefined);
+  assert.equal(spec?.agent, "cursor");
+  assert.equal(spec?.cli, "print");
+  assert.equal(spec?.webllmProfile, undefined);
   assert.equal(plan?.agent, "cursor");
+  assert.equal(plan?.cli, "print");
+  assert.equal(notify?.agent, "cursor");
+  assert.equal(notify?.cli, "tui");
+  assert.equal(fileJira?.cli, "tui");
+  assert.equal(fry?.agent, "claude");
+  assert.equal(fry?.cli, "print");
 });
 
 test("brief harvested from ideation becomes {{brief}} for Agenda (Cursor)", () => {

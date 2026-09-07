@@ -26,8 +26,8 @@ Intel Macs: Homebrew is `/usr/local` instead of `/opt/homebrew`. Use that path.
 ## Install the app
 
 ```bash
-git clone https://github.com/akash1233/team-ai-harness.git
-cd team-ai-harness
+git clone https://github.com/akash1233/team-ai-harness.git kindling
+cd kindling
 cp .env.example .env
 npm install
 npm run dev

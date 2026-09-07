@@ -98,12 +98,12 @@ test("mergeColumns discards saved columns and reloads discovery.flow.json", asyn
   );
 });
 
-test("mergeColumns applies flow JSON WebLLM agents; Notify stays Cursor", async () => {
+test("mergeColumns applies flow JSON agents; Notify stays Cursor", async () => {
   const { mergeColumns, mergeTeamConfig } = await import("./team-config.ts");
   const merged = mergeColumns(
     COLUMNS.map((c) => {
-      if (c.id === PREP_AGENDA_COLUMN_ID) return { ...c, agent: "cursor" as const, webllmProfile: undefined };
-      if (c.id === SYNTHESIZE_COLUMN_ID) return { ...c, agent: "studio" as const, webllmProfile: undefined };
+      if (c.id === PREP_AGENDA_COLUMN_ID) return { ...c, agent: "webllm" as const, cli: undefined, webllmProfile: "fast" };
+      if (c.id === SYNTHESIZE_COLUMN_ID) return { ...c, agent: "studio" as const, cli: undefined, webllmProfile: undefined };
       if (c.id === SEND_SLACK_COLUMN_ID) return { ...c, agent: "webllm" as const };
       return c;
     }),
@@ -111,10 +111,10 @@ test("mergeColumns applies flow JSON WebLLM agents; Notify stays Cursor", async 
   const agenda = merged.find((c) => c.id === PREP_AGENDA_COLUMN_ID);
   const spec = merged.find((c) => c.id === SYNTHESIZE_COLUMN_ID);
   const notify = merged.find((c) => c.id === SEND_SLACK_COLUMN_ID);
-  assert.equal(agenda?.agent, "webllm");
-  assert.equal(agenda?.webllmProfile, "fast");
-  assert.equal(spec?.agent, "webllm");
-  assert.equal(spec?.webllmProfile, "fast");
+  assert.equal(agenda?.agent, "cursor");
+  assert.equal(agenda?.cli, "print");
+  assert.equal(spec?.agent, "cursor");
+  assert.equal(spec?.cli, "print");
   assert.equal(notify?.agent, "cursor");
 
   const hydrated = mergeTeamConfig({
@@ -163,4 +163,33 @@ test("restoreSessionPipeline keeps pipeline edits for the current app process", 
     afterBoot.columns.some((c) => c.id === "custom-only"),
     false,
   );
+});
+
+test("restoreSessionPipeline fills missing cli from discovery JSON", async () => {
+  const { restoreSessionPipeline } = await import("./team-config.ts");
+  const columns = COLUMNS.map((c) =>
+    c.id === PREP_AGENDA_COLUMN_ID || c.id === SYNTHESIZE_COLUMN_ID
+      ? { ...c, agent: "webllm" as const, cli: undefined, webllmProfile: "fast" as const }
+      : { ...c, cli: undefined },
+  );
+  const session = restoreSessionPipeline({
+    flows: [
+      {
+        id: "flow-discovery",
+        name: "Discovery",
+        description: "",
+        columns,
+        autoAdvance: true,
+        autoRun: false,
+      },
+    ],
+    activeFlowId: "flow-discovery",
+    columns,
+  });
+  assert.equal(session.columns.find((c) => c.id === SEND_SLACK_COLUMN_ID)?.cli, "tui");
+  assert.equal(session.columns.find((c) => c.id === "write-plan")?.cli, "print");
+  assert.equal(session.columns.find((c) => c.id === PREP_AGENDA_COLUMN_ID)?.cli, "print");
+  assert.equal(session.columns.find((c) => c.id === PREP_AGENDA_COLUMN_ID)?.agent, "cursor");
+  assert.equal(session.columns.find((c) => c.id === SYNTHESIZE_COLUMN_ID)?.agent, "cursor");
+  assert.equal(session.columns.find((c) => c.id === SYNTHESIZE_COLUMN_ID)?.cli, "print");
 });

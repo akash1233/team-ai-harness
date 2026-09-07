@@ -14,6 +14,8 @@ export type FlowStageSpec = {
   label: string;
   role: string;
   agent?: string;
+  /** Cursor/Claude launch: "print" (one-shot -p) or "tui" (interactive Terminal). */
+  cli?: string;
   webllmProfile?: string;
   writes?: string[];
   maxTokens?: number;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isReviewGate, isRunnableStage, resolveStep, stepLabel, legacyDefaultAgent, stepBadge } from "./agents.ts";
+import { isReviewGate, isRunnableStage, resolveStageCli, resolveStep, stageUsesCli, stepLabel, legacyDefaultAgent, stepBadge } from "./agents.ts";
 import { DEFAULT_PRICING } from "./pricing.ts";
 import type { ExecutionConfig } from "./types.ts";
 
@@ -84,6 +84,22 @@ test("review and approve are gates, not runnable agent stages", () => {
   assert.equal(isRunnableStage({ role: "approve" }), false);
   assert.equal(isRunnableStage({ role: "prompt" }), true);
   assert.equal(isRunnableStage({ role: "collect-input" }), true);
+});
+
+test("cli mode defaults to print; tui only when the stage says so", () => {
+  assert.equal(resolveStageCli(undefined), "print");
+  assert.equal(resolveStageCli({}), "print");
+  assert.equal(resolveStageCli({ cli: "print" }), "print");
+  assert.equal(resolveStageCli({ cli: "tui" }), "tui");
+  assert.equal(resolveStageCli({ cli: "nope" }), "print");
+});
+
+test("Cursor and Claude stages use the CLI picker; WebLLM and gates do not", () => {
+  assert.equal(stageUsesCli({ agent: "cursor", role: "prompt" }, exec), true);
+  assert.equal(stageUsesCli({ agent: "claude", role: "prompt" }, exec), true);
+  assert.equal(stageUsesCli({ agent: "webllm", role: "prompt" }, exec), false);
+  assert.equal(stageUsesCli({ agent: "manual", role: "collect-input" }, exec), false);
+  assert.equal(stageUsesCli({ role: "review" }, exec), false);
 });
 
 test("WebLLM pin ignores Cursor local/remote target", () => {

@@ -13,8 +13,8 @@ brew install node@22
 echo 'export PATH="/opt/homebrew/opt/node@22/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 
-git clone https://github.com/akash1233/team-ai-harness.git
-cd team-ai-harness
+git clone https://github.com/akash1233/team-ai-harness.git kindling
+cd kindling
 cp .env.example .env.local
 npm install
 npm run dev

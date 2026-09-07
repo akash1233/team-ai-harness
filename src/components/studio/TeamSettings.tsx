@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
 import { cn } from "@/lib/cn";
-import type { AgentKind, AgentTarget, ColumnRole, DensityId, PipelineLayout, StepAgent, ThemeId, WebllmProfile } from "@/lib/types";
+import type { AgentKind, AgentTarget, ColumnRole, DensityId, PipelineLayout, StageCliMode, StepAgent, ThemeId, WebllmProfile } from "@/lib/types";
 import { createDefaultExecution, executionLabel } from "@/lib/team-config";
-import { AGENT_KINDS, isReviewGate, resolveStep } from "@/lib/agents";
+import { AGENT_KINDS, isReviewGate, resolveStep, stageUsesCli } from "@/lib/agents";
 import { WEBLLM_PROFILES, stageUsesWebllm } from "@/lib/webllm";
 import { WebllmFields } from "@/components/studio/settings/WebllmFields";
 import { inspectCliBins, readAppLogs, testExecution } from "@/lib/discovery-agent";
@@ -428,7 +428,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
     <div className="flex flex-col gap-3">
       <div className="rounded-md border border-border bg-inset px-3 py-2 text-sm text-muted">
         <p>
-          This tab only <strong className="font-medium text-fg">designs</strong> the flow. Run it on the board. Pin <strong className="font-medium text-fg">Who runs it</strong> to Cursor, Claude, Studio, CIS, or WebLLM. WebLLM stages also get a performance picker (Fast / Balanced / Quality). Notify stays on Cursor. The variable is the last agent reply only — no logs.
+          This tab only <strong className="font-medium text-fg">designs</strong> the flow. Run it on the board. Pin <strong className="font-medium text-fg">Who runs it</strong> to Cursor, Claude, Studio, CIS, or WebLLM. WebLLM stages also get a performance picker (Fast / Balanced / Quality). Cursor/Claude stages also pick <strong className="font-medium text-fg">Print</strong> (one-shot CLI) or <strong className="font-medium text-fg">TUI</strong> (interactive Terminal). Notify stays on Cursor TUI. The variable is the last agent reply only — no logs.
         </p>
       </div>
       <FlowSpecWarning />
@@ -480,6 +480,20 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                 </select>
               </label>
               )}
+              {stageUsesCli(col, execution) ? (
+                <label className="flex flex-col gap-1">
+                  <span className="text-micro text-subtle">Cursor / Claude launch</span>
+                  <select
+                    className="h-11 rounded-md border border-border bg-inset px-2 text-sm"
+                    value={col.cli === "tui" ? "tui" : "print"}
+                    onChange={(e) => updateColumn(col.id, { cli: e.target.value as StageCliMode })}
+                    title="Print: one-shot -p. TUI: interactive Terminal so you can approve tools."
+                  >
+                    <option value="print">Print</option>
+                    <option value="tui">TUI</option>
+                  </select>
+                </label>
+              ) : null}
               {stageUsesWebllm(col, execution) ? (
                 <label className="flex flex-col gap-1">
                   <span className="text-micro text-subtle">WebLLM performance</span>

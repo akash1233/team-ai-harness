@@ -15,6 +15,7 @@ import {
   columnById,
 } from "./columns";
 import { fallbackFor } from "./agent-fallbacks";
+import { resolveStageCli } from "./agents";
 import { formatKindlingTerminalTitle, stripThinkBlocks } from "./cli-session";
 import { createDefaultExecution } from "./team-config";
 import { clip, getLogBuffer, getLogLevel, startCall } from "./logger";
@@ -280,18 +281,12 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
       }
     }
 
-    const notifyExecution: ExecutionConfig | undefined =
-      columnId === SEND_SLACK_COLUMN_ID
-        ? {
-            ...(execution ?? createDefaultExecution()),
-            fullAgentMode: true,
-            runInTerminal: true,
-            demoFallbacks: false,
-          }
-        : execution;
-
     const stageCol = columnById(columnId, data.columns);
     const terminalTitle = stageCol ? formatKindlingTerminalTitle(stageCol.label) : undefined;
+    const notifyExecution: ExecutionConfig | undefined =
+      columnId === SEND_SLACK_COLUMN_ID
+        ? { ...(execution ?? createDefaultExecution()), demoFallbacks: false }
+        : execution;
 
     const { runModel } = await import("./execution.server");
     const live = await runModel({
@@ -301,6 +296,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
       execution: notifyExecution,
       promptId,
       stepAgent,
+      cliMode: resolveStageCli(stageCol),
       terminalTitle,
     });
     if (live.sessionDir) {

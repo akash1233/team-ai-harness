@@ -123,13 +123,22 @@ test("flowStageMentionedKeys lists tokens from JSON prompt", () => {
   assert.ok(keys.includes("jira"));
 });
 
-test("Discovery flow pins Agenda and Spec to WebLLM; Notify stays Cursor", () => {
-  assert.equal(flowStageAgent("prep-agenda"), "webllm");
-  assert.equal(flowStageWebllmProfile("prep-agenda"), "fast");
-  assert.equal(flowStageAgent("synthesize"), "webllm");
-  assert.equal(flowStageWebllmProfile("synthesize"), "fast");
+test("Discovery flow pins Agenda and Spec to Cursor print; Notify stays Cursor TUI", () => {
+  assert.equal(flowStageAgent("prep-agenda"), "cursor");
+  assert.equal(flowStageWebllmProfile("prep-agenda"), undefined);
+  assert.equal(flowStageAgent("synthesize"), "cursor");
+  assert.equal(flowStageWebllmProfile("synthesize"), undefined);
   assert.equal(flowStageAgent("send-slack"), "cursor");
   assert.equal(flowStageWebllmProfile("send-slack"), undefined);
+});
+
+test("Discovery Cursor/Claude stages declare print vs TUI", () => {
+  assert.equal(getFlowStage("send-slack")?.cli, "tui");
+  assert.equal(getFlowStage("file-jira")?.cli, "tui");
+  assert.equal(getFlowStage("write-plan")?.cli, "print");
+  assert.equal(getFlowStage("fry")?.cli, "print");
+  assert.equal(getFlowStage("prep-agenda")?.cli, "print");
+  assert.equal(getFlowStage("synthesize")?.cli, "print");
 });
 
 test("board columns match discovery.flow.json stages and omit Blocked", () => {

@@ -1,6 +1,6 @@
 import discoveryFlowJson from "../../flows/discovery.flow.json" with { type: "json" };
 import type { FlowSpec, FlowStageSpec } from "./flow-spec.ts";
-import type { ColumnRole, RailTone, StepAgent, WebllmProfile, WorkflowColumn } from "./types";
+import type { ColumnRole, RailTone, StageCliMode, StepAgent, WebllmProfile, WorkflowColumn } from "./types";
 
 export const IDEATION_COLUMN_ID = "ideation";
 export const PREP_AGENDA_COLUMN_ID = "prep-agenda";
@@ -74,6 +74,7 @@ export function columnsFromFlowSpec(flow: FlowSpec): WorkflowColumn[] {
       rail: railFor(role),
       enabled: true,
       agent: stageAgent(stage),
+      cli: stage.cli === "print" || stage.cli === "tui" ? (stage.cli as StageCliMode) : undefined,
       webllmProfile: profile,
       outputKey: stageOutputKey(stage),
       promptTemplate: stagePromptBody(stage),

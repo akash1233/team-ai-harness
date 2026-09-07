@@ -73,6 +73,7 @@ Use any token below in a stage `prompt.system` or `prompt.user` string. If a tok
 1. Add or edit a stage in `discovery.flow.json` with `prompt.system` and `prompt.user`.
 2. Reference only the `{{variables}}` you need from the table above.
 3. Put business rules in `prompt.system` (e.g. "use every attached Jira, not just the first").
-4. Run `npm run test:kindling` — `flow-spec.test.ts` validates tokens against the catalog.
+4. On Cursor/Claude stages, set `"cli": "print"` (one-shot `-p`) or `"cli": "tui"` (interactive Terminal). Omit = print. WebLLM/manual/review ignore it.
+5. Run `npm run test:kindling` — `flow-spec.test.ts` validates tokens against the catalog.
 
 Quick Spec flow JSON is not shipped yet; add `flows/quick-spec.flow.json` using the same pattern when needed.

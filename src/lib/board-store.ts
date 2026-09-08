@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Flow, GrillQuestion, GrillRound, PipelineRun, TeamConfig, TeamDoc, TeamMember, TeamPrompt, Ticket, WorkflowColumn } from "./types";
+import type { Flow, FryQuestion, FryRound, PipelineRun, TeamConfig, TeamDoc, TeamMember, TeamPrompt, Ticket, WorkflowColumn } from "./types";
 import type { LinkedJira, LinkedRepo } from "./connectors";
 import { connectorVars, hydrateLinkedJiras, mergeConnectors } from "./connectors";
 import {
@@ -9,6 +9,8 @@ import {
   FRY_COLUMN_ID,
   IDEATION_COLUMN_ID,
   SEND_SLACK_COLUMN_ID,
+  isFryStage,
+  migrateColumnId,
   nextColumnId,
   parkOrphanTickets,
   previousColumn,
@@ -19,6 +21,7 @@ import {
   columnById,
 } from "./columns";
 import { beginStageRun, clearTicketHistory, createSampleTickets, STORAGE_KEY } from "./sample-data";
+import { migrateTicketFry } from "./fry-migrate";
 import { extractNotifyMcpResult } from "./discovery-slack";
 import { getAppBootId } from "./app-boot";
 import {
@@ -31,12 +34,12 @@ import {
   writeFlowColumns,
 } from "./team-config";
 import { stageOutputFromLog } from "./cli-session";
-import { harvestVars, harvestBriefVars, harvestNotifyVars, harvestReviewVars, outputVarName, readManualOutput, reviewSourceText, syncNotifyPreviewVars } from "./flow-context";
+import { applyFryAliases, harvestVars, harvestBriefVars, harvestNotifyVars, harvestReviewVars, outputVarName, readManualOutput, reviewSourceText, syncNotifyPreviewVars } from "./flow-context";
 import { isManualStep, isReviewGate, resolveStageCli, resolveStep } from "./agents";
 import { promptIdForColumn, resolveStagePrompt, unbindJiraKey } from "./prompts";
 import { assignQuestions } from "./grill";
 import { nextKey, uid } from "./format";
-import { extractGrill, extractPlan, runDiscoveryAgent, type AgentResult, type StagePayload } from "./discovery-agent";
+import { extractFry, extractPlan, runDiscoveryAgent, type AgentResult, type StagePayload } from "./discovery-agent";
 import { createLogger } from "./logger";
 import { setAppConsoleSink } from "./app-console";
 
@@ -78,8 +81,8 @@ type BoardState = {
   patchLiveLog: (id: string, log: string) => void;
   harvestLiveSession: (id: string, result: { ok: boolean; log: string; error?: string }) => Promise<void>;
   finishLiveSession: (id: string) => Promise<void>;
-  submitGrill: (id: string, answers: Record<number, string>) => Promise<void>;
-  patchGrillQuestion: (ticketId: string, roundId: string, n: number, patch: Partial<GrillQuestion>) => void;
+  submitFry: (id: string, answers: Record<number, string>) => Promise<void>;
+  patchFryQuestion: (ticketId: string, roundId: string, n: number, patch: Partial<FryQuestion>) => void;
   setActiveMember: (id: string) => void;
   upsertDoc: (doc: TeamDoc) => void;
   removeDoc: (id: string) => void;
@@ -150,12 +153,13 @@ function withTicket(tickets: Ticket[], id: string, patch: Partial<Ticket> | ((t:
 
 function stampTicket(t: Ticket, flowId = DISCOVERY_FLOW_ID): Ticket {
   const legacy = t as Ticket & { linkedJira?: LinkedJira };
-  return {
+  const migrated = migrateTicketFry({
     ...t,
     flowId: t.flowId || flowId,
     vars: t.vars ?? {},
     linkedJiras: hydrateLinkedJiras(t.linkedJiras, legacy.linkedJira),
-  };
+  });
+  return migrated;
 }
 
 /** Prompt bindings may be hand-typed, so match catalog issues without regard to case. */
@@ -169,7 +173,7 @@ async function invokeStageAgent(
   opts: {
     ticket: Ticket;
     columnId: string;
-    grillSubmit?: boolean;
+    frySubmit?: boolean;
     promptOverride?: StagePayload;
     onProgress?: (text: string) => void;
   },
@@ -180,7 +184,7 @@ async function invokeStageAgent(
   const payload = {
     ticket: opts.ticket,
     columnId: opts.columnId,
-    grillSubmit: opts.grillSubmit,
+    frySubmit: opts.frySubmit,
     promptId: resolved.studioPromptId,
     promptTemplate: resolved.baseBody || liveCol?.promptTemplate,
     execution: config.execution,
@@ -271,15 +275,16 @@ export const useBoardStore = create<BoardState>((set, get) => ({
               ? restoreSessionPipeline(parsed.config)
               : mergeTeamConfig(parsed.config)
             : createDefaultTeam();
+          const tickets = parkOrphanTickets(
+            parsed.tickets.map((t) => stampTicket(t, config.activeFlowId)),
+            config.columns,
+          );
           set({
-            tickets: parkOrphanTickets(
-              parsed.tickets.map((t) => stampTicket(t, config.activeFlowId)),
-              config.columns,
-            ),
+            tickets,
             flowRuns:
               Array.isArray(parsed.flowRuns) && parsed.flowRuns.length > 0
-                ? parsed.flowRuns
-                : seedRunsFromTickets(parsed.tickets, config.activeFlowId),
+                ? parsed.flowRuns.map((r) => ({ ...r, columnId: migrateColumnId(r.columnId) }))
+                : seedRunsFromTickets(tickets, config.activeFlowId),
             config,
             selectedId: parsed.selectedId ?? null,
             activeStageId: resolveActiveStage(config.columns, parsed.activeStageId),
@@ -369,7 +374,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       outputs: {},
       vars: extra,
       agentResponses: [],
-      grillRounds: [],
+      fryRounds: [],
       fryComplete: false,
       plan: null,
       jiraCreated: [],
@@ -670,15 +675,15 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
       set({
         tickets: withTicket(get().tickets, id, (t) => {
-          const grillRounds: GrillRound[] =
-            result.grill && result.grill.questions.length > 0
+          const fryRounds: FryRound[] =
+            result.fry && result.fry.questions.length > 0
               ? [
-                  ...t.grillRounds,
+                  ...t.fryRounds,
                   {
                     id: uid("round"),
                     submitted: false,
                     questions: assignQuestions(
-                      result.grill.questions.map((q) => ({
+                      result.fry.questions.map((q) => ({
                         n: q.n,
                         question: q.question,
                         recommended: q.recommended,
@@ -689,16 +694,16 @@ export const useBoardStore = create<BoardState>((set, get) => ({
                     ),
                   },
                 ]
-              : t.grillRounds;
+              : t.fryRounds;
           const body =
-            t.columnId === FRY_COLUMN_ID && !result.grill?.frontierEmpty
+            isFryStage(t.columnId) && !result.fry?.frontierEmpty
               ? ""
               : stageOutputFromLog(result.text);
           const nextVars = {
             ...(body ? harvestVars({ ...t, vars: t.vars ?? {} }, liveCol, body) : t.vars ?? {}),
           };
           if (result.plan) nextVars.plan = JSON.stringify(result.plan, null, 2);
-          if (result.grill?.frontierEmpty && result.text) nextVars.grill = stageOutputFromLog(result.text);
+          if (result.fry?.frontierEmpty && result.text) applyFryAliases(nextVars, stageOutputFromLog(result.text));
           return {
             ...t,
             status: "idle",
@@ -706,13 +711,13 @@ export const useBoardStore = create<BoardState>((set, get) => ({
             spend: Math.round((t.spend + spendDelta) * 100) / 100,
             runId: result.runId || t.runId,
             outputs:
-              t.columnId === FRY_COLUMN_ID && !result.grill?.frontierEmpty
+              isFryStage(t.columnId) && !result.fry?.frontierEmpty
                 ? t.outputs
                 : { ...t.outputs, [t.columnId]: body },
             vars: nextVars,
             agentResponses: [response, ...t.agentResponses],
-            grillRounds,
-            fryComplete: result.grill?.frontierEmpty ? true : t.fryComplete,
+            fryRounds,
+            fryComplete: result.fry?.frontierEmpty ? true : t.fryComplete,
             plan: result.plan ?? t.plan,
             slackPosted: result.slack ?? t.slackPosted,
             jiraCreated: result.jira ?? t.jiraCreated,
@@ -761,7 +766,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }
     const liveCol = columnById(ticket.columnId, get().config.columns);
     const rawLog = result.log.trim();
-    const grill = ticket.columnId === FRY_COLUMN_ID ? extractGrill(rawLog) : undefined;
+    const fry = isFryStage(ticket.columnId) ? extractFry(rawLog) : undefined;
     const plan = ticket.columnId === WRITE_PLAN_COLUMN_ID ? extractPlan(rawLog) : undefined;
 
     const slackMessage = (ticket.vars?.slackMessage || "").trim();
@@ -788,12 +793,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         : `Posted to #${notifyChannel || "—"} (${channelId || "—"})`;
       summary = mcp.found ? "Notify · posted" : "Notify · Terminal";
     } else {
-      body = ticket.columnId === FRY_COLUMN_ID && grill && !grill.frontierEmpty ? "" : rawLog;
+      body = isFryStage(ticket.columnId) && fry && !fry.frontierEmpty ? "" : rawLog;
       nextVars = {
         ...(body ? harvestVars({ ...ticket, vars: ticket.vars ?? {} }, liveCol, body) : ticket.vars ?? {}),
       };
       if (plan) nextVars.plan = JSON.stringify(plan, null, 2);
-      if (grill?.frontierEmpty && rawLog) nextVars.grill = rawLog;
+      if (fry?.frontierEmpty && rawLog) applyFryAliases(nextVars, rawLog);
       summary = isNotify ? "Notify · Terminal" : "Long stage · Terminal";
     }
 
@@ -805,7 +810,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         liveInput: undefined,
         liveLog: rawLog,
         outputs:
-          t.columnId === FRY_COLUMN_ID && grill && !grill.frontierEmpty
+          isFryStage(t.columnId) && fry && !fry.frontierEmpty
             ? t.outputs
             : { ...t.outputs, [t.columnId]: body },
         vars: nextVars,
@@ -822,15 +827,15 @@ export const useBoardStore = create<BoardState>((set, get) => ({
           },
           ...t.agentResponses,
         ],
-        grillRounds:
-          grill && grill.questions.length
+        fryRounds:
+          fry && fry.questions.length
             ? [
-                ...t.grillRounds,
+                ...t.fryRounds,
                 {
                   id: uid("round"),
                   submitted: false,
                   questions: assignQuestions(
-                    grill.questions.map((q) => ({
+                    fry.questions.map((q) => ({
                       n: q.n,
                       question: q.question,
                       recommended: q.recommended,
@@ -841,8 +846,8 @@ export const useBoardStore = create<BoardState>((set, get) => ({
                   ),
                 },
               ]
-            : t.grillRounds,
-        fryComplete: grill?.frontierEmpty ? true : t.fryComplete,
+            : t.fryRounds,
+        fryComplete: fry?.frontierEmpty ? true : t.fryComplete,
         plan: plan ?? t.plan,
       })),
     });
@@ -883,32 +888,32 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     });
   },
 
-  submitGrill: async (id, answers) => {
+  submitFry: async (id, answers) => {
     const ticket = get().tickets.find((t) => t.id === id);
     if (!ticket) return;
-    const last = ticket.grillRounds[ticket.grillRounds.length - 1];
+    const last = ticket.fryRounds[ticket.fryRounds.length - 1];
     if (!last || last.submitted) return;
 
-    const filled: GrillQuestion[] = last.questions.map((q) => ({
+    const filled: FryQuestion[] = last.questions.map((q) => ({
       ...q,
       answer: (answers[q.n] ?? q.answer ?? q.recommended).trim(),
     }));
 
     const fryCol = columnById(FRY_COLUMN_ID, get().config.columns);
-    const grillStep = resolveStep(fryCol, get().config.execution);
+    const fryStep = resolveStep(fryCol, get().config.execution);
     set({
       tickets: withTicket(get().tickets, id, (t) =>
         beginStageRun(
           {
             ...t,
-            grillRounds: t.grillRounds.map((r) =>
+            fryRounds: t.fryRounds.map((r) =>
               r.id === last.id ? { ...r, questions: filled, submitted: true } : r,
             ),
           },
-          fryCol ?? { id: FRY_COLUMN_ID, outputKey: "grill" },
+          fryCol ?? { id: FRY_COLUMN_ID, outputKey: "fryme" },
           {
-            loadingText: grillStep.kind === "webllm" ? `Loading ${grillStep.label}…` : "Running…",
-            keepGrillRounds: true,
+            loadingText: fryStep.kind === "webllm" ? `Loading ${fryStep.label}…` : "Running…",
+            keepFryRounds: true,
           },
         ),
       ),
@@ -921,7 +926,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const result = await invokeStageAgent(get, {
         ticket: latest,
         columnId: FRY_COLUMN_ID,
-        grillSubmit: true,
+        frySubmit: true,
         onProgress: (text) => get().patchLiveLog(id, text),
       });
       if (!result.ok) {
@@ -934,10 +939,10 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         at: new Date().toISOString(),
         columnId: FRY_COLUMN_ID,
         summary: result.via
-          ? `${result.grill?.frontierEmpty ? "Fryme complete" : "Grill round"} · ${result.via}`
-          : result.grill?.frontierEmpty
-            ? "Fryme complete"
-            : "Grill round",
+          ? `${result.fry?.frontierEmpty ? "Fry Me complete" : "Fry Me round"} · ${result.via}`
+          : result.fry?.frontierEmpty
+            ? "Fry Me complete"
+            : "Fry Me round",
         input: result.input,
         body: stageOutputFromLog(result.text),
         via: result.via,
@@ -948,14 +953,14 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       set({
         tickets: withTicket(get().tickets, id, (t) => {
           const nextRounds =
-            result.grill && result.grill.questions.length > 0 && !result.grill.frontierEmpty
+            result.fry && result.fry.questions.length > 0 && !result.fry.frontierEmpty
               ? [
-                  ...t.grillRounds,
+                  ...t.fryRounds,
                   {
                     id: uid("round"),
                     submitted: false,
                     questions: assignQuestions(
-                      result.grill.questions.map((q) => ({
+                      result.fry.questions.map((q) => ({
                         n: q.n,
                         question: q.question,
                         recommended: q.recommended,
@@ -966,17 +971,19 @@ export const useBoardStore = create<BoardState>((set, get) => ({
                     ),
                   },
                 ]
-              : t.grillRounds;
-          const conclusions = result.grill?.frontierEmpty ? stageOutputFromLog(result.text) : t.outputs[FRY_COLUMN_ID];
+              : t.fryRounds;
+          const conclusions = result.fry?.frontierEmpty
+            ? stageOutputFromLog(result.text)
+            : t.outputs[FRY_COLUMN_ID] || t.outputs.fry;
           const vars = { ...t.vars };
-          if (conclusions) vars.grill = conclusions;
+          if (conclusions) applyFryAliases(vars, conclusions);
           return {
             ...t,
             status: "idle",
-            liveLog: grillStep.kind === "webllm" ? undefined : t.liveLog,
+            liveLog: fryStep.kind === "webllm" ? undefined : t.liveLog,
             spend: Math.round((t.spend + spendDelta) * 100) / 100,
-            grillRounds: nextRounds,
-            fryComplete: Boolean(result.grill?.frontierEmpty),
+            fryRounds: nextRounds,
+            fryComplete: Boolean(result.fry?.frontierEmpty),
             outputs: conclusions ? { ...t.outputs, [FRY_COLUMN_ID]: conclusions } : t.outputs,
             vars,
             agentResponses: [response, ...t.agentResponses],
@@ -987,7 +994,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       if (after) await get().continueAfter(id);
       else get().persist();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Grill failed";
+      const message = err instanceof Error ? err.message : "Fry Me failed";
       get().failTicket(id, message, FRY_COLUMN_ID);
     }
   },
@@ -1162,12 +1169,12 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     get().persist();
   },
 
-  patchGrillQuestion: (ticketId, roundId, n, patch) => {
+  patchFryQuestion: (ticketId, roundId, n, patch) => {
     const member = get().config.members.find((m) => m.id === get().activeMemberId);
     set({
       tickets: withTicket(get().tickets, ticketId, (t) => ({
         ...t,
-        grillRounds: t.grillRounds.map((r) =>
+        fryRounds: t.fryRounds.map((r) =>
           r.id !== roundId
             ? r
             : {
@@ -1237,7 +1244,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     const ticket = get().tickets.find((t) => t.id === id);
     if (!ticket) return;
     const col = columnById(ticket.columnId, get().config.columns);
-    if (col?.id === FRY_COLUMN_ID && !ticket.fryComplete) {
+    if (isFryStage(col?.id ?? ticket.columnId) && !ticket.fryComplete) {
       get().persist();
       return;
     }

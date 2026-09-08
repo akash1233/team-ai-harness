@@ -100,13 +100,20 @@ export function mergeAppEnv(appEnv, processEnv) {
 }
 
 /**
- * Browser bundles only see `VITE_*`. Copy PIT_LOG_LEVEL so WebLLM logs honor
- * the same .env knob without leaking other PIT_* values.
+ * Browser bundles only see `VITE_*`. Copy LOG_LEVEL so WebLLM logs honor
+ * the same .env knob without leaking other server-only values.
  */
-export function mirrorPitLogLevel(env) {
-  const pit = typeof env.PIT_LOG_LEVEL === "string" ? env.PIT_LOG_LEVEL.trim() : "";
-  const vite = typeof env.VITE_PIT_LOG_LEVEL === "string" ? env.VITE_PIT_LOG_LEVEL.trim() : "";
-  if (pit && !vite) return { ...env, VITE_PIT_LOG_LEVEL: pit };
+export function mirrorLogLevel(env) {
+  const level =
+    (typeof env.LOG_LEVEL === "string" && env.LOG_LEVEL.trim()) ||
+    (typeof env.PIT_LOG_LEVEL === "string" && env.PIT_LOG_LEVEL.trim()) ||
+    "";
+  const vite =
+    (typeof env.VITE_LOG_LEVEL === "string" && env.VITE_LOG_LEVEL.trim()) ||
+    (typeof env.VITE_PIT_LOG_LEVEL === "string" && env.VITE_PIT_LOG_LEVEL.trim()) ||
+    "";
+  if (level && !vite) return { ...env, VITE_LOG_LEVEL: level };
+  if (vite && !env.VITE_LOG_LEVEL) return { ...env, VITE_LOG_LEVEL: vite };
   return env;
 }
 
@@ -156,7 +163,7 @@ function main(argv) {
     process.exit(2);
   }
   const root = projectRoot();
-  const env = mirrorPitLogLevel(mergeAppEnv({ ...readAppEnv(root), ...readDotEnv(root) }, process.env));
+  const env = mirrorLogLevel(mergeAppEnv({ ...readAppEnv(root), ...readDotEnv(root) }, process.env));
   const child = spawn(command, args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {

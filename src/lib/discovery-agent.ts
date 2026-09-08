@@ -1,18 +1,18 @@
 import { createServerFn } from "@tanstack/react-start";
-import type { ExecutionConfig, GrillQuestion, Plan, SlackPost, StepAgent, TeamDoc, Ticket, JiraIssue, WorkflowColumn } from "./types";
+import type { ExecutionConfig, FryQuestion, Plan, SlackPost, StepAgent, TeamDoc, Ticket, JiraIssue, WorkflowColumn } from "./types";
 import { mergeJiraIssues, type JiraConnection, type LinkedJira } from "./connectors";
 import { buildContext, interpolate } from "./flow-context";
 import { resolveFlowStagePrompt } from "./flow-spec";
 import {
   COLUMNS,
   FILE_JIRA_COLUMN_ID,
-  FRY_COLUMN_ID,
   PLAN_JSON_END,
   PLAN_JSON_START,
   SEND_SLACK_COLUMN_ID,
   SYNTHESIZE_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
   columnById,
+  isFryStage,
 } from "./columns";
 import { fallbackFor } from "./agent-fallbacks";
 import { resolveStageCli } from "./agents";
@@ -33,7 +33,7 @@ export type AgentResult =
       plan?: Plan;
       slack?: SlackPost;
       jira?: JiraIssue[];
-      grill?: { frontierEmpty: boolean; questions: GrillQuestion[] };
+      fry?: { frontierEmpty: boolean; questions: FryQuestion[] };
       via?: string;
       usage?: { inputTokens: number; outputTokens: number; estimated: boolean };
       sessionDir?: string;
@@ -79,7 +79,7 @@ export type StagePayload = { system: string; user: string };
 export type AgentInput = {
   ticket: Ticket;
   columnId: string;
-  grillSubmit?: boolean;
+  frySubmit?: boolean;
   promptTemplate?: string;
   promptId?: string;
   execution?: ExecutionConfig;
@@ -115,7 +115,7 @@ export function extractPlan(text: string): Plan | undefined {
   return candidate ? parsePlanJson(candidate) : undefined;
 }
 
-export function extractGrill(text: string): { frontierEmpty: boolean; questions: GrillQuestion[] } | undefined {
+export function extractFry(text: string): { frontierEmpty: boolean; questions: FryQuestion[] } | undefined {
   const fence = text.match(/```json\s*([\s\S]*?)```/);
   const raw = fence?.[1]?.trim() ?? (text.trim().startsWith("{") ? text.trim() : "");
   if (!raw) return undefined;
@@ -125,7 +125,7 @@ export function extractGrill(text: string): { frontierEmpty: boolean; questions:
       conclusions?: string;
       questions?: Array<{ n?: number; question?: string; recommended?: string; source?: string }>;
     };
-    const questions: GrillQuestion[] = (parsed.questions ?? []).map((q, i) => ({
+    const questions: FryQuestion[] = (parsed.questions ?? []).map((q, i) => ({
       n: q.n ?? i + 1,
       question: String(q.question ?? ""),
       recommended: String(q.recommended ?? ""),
@@ -145,7 +145,7 @@ async function resolveStagePayload(data: AgentInput): Promise<{
   const {
     ticket,
     columnId,
-    grillSubmit,
+    frySubmit,
     promptTemplate,
     docs,
     jira,
@@ -156,7 +156,7 @@ async function resolveStagePayload(data: AgentInput): Promise<{
   } = data;
   const issues = await resolveJiraIssues(ticket.linkedJiras ?? [], jiraIssues, jiraKeys, jira);
   const promptTicket = { ...ticket, linkedJiras: issues };
-  const fromFlow = resolveFlowStagePrompt(columnId, promptTicket, docs, { grillSubmit, promptTemplate });
+  const fromFlow = resolveFlowStagePrompt(columnId, promptTicket, docs, { frySubmit, promptTemplate });
   let prompt: { system: string; user: string; max: number };
 
   if (fromFlow) {
@@ -194,7 +194,7 @@ export const previewStagePrompt = createServerFn({ method: "POST" })
 export const runDiscoveryAgent = createServerFn({ method: "POST" })
   .validator((input: AgentInput) => input)
   .handler(async ({ data }): Promise<AgentResult> => {
-    const { ticket, columnId, grillSubmit, promptId, execution, stepAgent, promptOverride } = data;
+    const { ticket, columnId, frySubmit, promptId, execution, stepAgent, promptOverride } = data;
     const runId =
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
@@ -312,7 +312,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
         sessionDir: live.sessionDir,
       };
     }
-    const fb = fallbackFor(ticket, columnId, grillSubmit);
+    const fb = fallbackFor(ticket, columnId, frySubmit);
     const timedOut = !live.ok && /^Timed out after/.test(live.error || "");
     const useDemo =
       columnId === SEND_SLACK_COLUMN_ID || timedOut
@@ -327,13 +327,13 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
     const spend = live.ok && !useDemo ? live.spend ?? 0 : 0;
 
     const plan = columnId === WRITE_PLAN_COLUMN_ID ? extractPlan(text) ?? fb.plan : undefined;
-    const grill = columnId === FRY_COLUMN_ID ? extractGrill(text) ?? fb.grill : undefined;
+    const fry = isFryStage(columnId) ? extractFry(text) ?? fb.fry : undefined;
 
     const summary =
-      columnId === FRY_COLUMN_ID
-        ? grill?.frontierEmpty
-          ? "Fryme complete"
-          : `Grill round (${grill?.questions.length ?? 0} questions)`
+      isFryStage(columnId)
+        ? fry?.frontierEmpty
+          ? "Fry Me complete"
+          : `Fry Me round (${fry?.questions.length ?? 0} questions)`
         : columnId === WRITE_PLAN_COLUMN_ID
           ? "Plan drafted"
           : columnId === SYNTHESIZE_COLUMN_ID
@@ -351,7 +351,7 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
       spend,
       runId,
       plan,
-      grill,
+      fry,
       via,
       usage: live.ok && !useDemo ? live.usage : undefined,
     };

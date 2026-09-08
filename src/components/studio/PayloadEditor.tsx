@@ -32,7 +32,7 @@ export function useStagePayload(ticket: Ticket) {
     linkedJiras: ticket.linkedJiras,
     linkedRepo: ticket.linkedRepo,
     plan: ticket.plan,
-    grillRounds: ticket.grillRounds,
+    fryRounds: ticket.fryRounds,
     prompt: stage?.prompt,
     columns: config.columns,
     prompts: config.prompts,

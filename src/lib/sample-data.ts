@@ -1,5 +1,11 @@
 import type { Ticket, WorkflowColumn } from "./types.ts";
-import { DISCOVERY_FLOW_ID, FRY_COLUMN_ID, IDEATION_COLUMN_ID, WRITE_PLAN_COLUMN_ID } from "./columns.ts";
+import {
+  DISCOVERY_FLOW_ID,
+  IDEATION_COLUMN_ID,
+  WRITE_PLAN_COLUMN_ID,
+  columnIdAliases,
+  isFryStage,
+} from "./columns.ts";
 import { outputVarName } from "./flow-context.ts";
 
 function iso(h: number, m: number, s = 0) {
@@ -30,7 +36,7 @@ export function createSampleTickets(): Ticket[] {
       transcript: "",
       outputs: {},
       agentResponses: [],
-      grillRounds: [],
+      fryRounds: [],
       fryComplete: false,
       plan: null,
       jiraCreated: [],
@@ -68,7 +74,7 @@ export function clearTicketHistory(
     agentResponses: [],
     outputs: {},
     vars: {},
-    grillRounds: [],
+    fryRounds: [],
     fryComplete: false,
     plan: null,
     jiraCreated: [],
@@ -86,15 +92,25 @@ export const STORAGE_KEY = "kindling-v1";
 export function beginStageRun(
   ticket: Ticket,
   column: Pick<WorkflowColumn, "id" | "outputKey">,
-  opts?: { loadingText?: string; keepGrillRounds?: boolean },
+  opts?: { loadingText?: string; keepFryRounds?: boolean },
 ): Ticket {
   const key = outputVarName(column);
-  const oldBody = ticket.outputs[column.id] || (key ? ticket.vars?.[key] : undefined) || ticket.liveLog;
+  const aliases = [
+    ...columnIdAliases(column.id),
+    ...(key ? [key] : []),
+    ...(isFryStage(column.id) ? ["fryme", "grill", "fyyme", "fry"] : []),
+  ];
+  const oldBody =
+    ticket.outputs[column.id] ||
+    aliases.map((id) => ticket.outputs[id]).find((value) => value?.trim()) ||
+    (key ? ticket.vars?.[key] : undefined) ||
+    ticket.liveLog;
   const outputs = { ...ticket.outputs };
-  delete outputs[column.id];
   const vars = { ...ticket.vars };
-  delete vars[column.id];
-  if (key) delete vars[key];
+  for (const id of aliases) {
+    delete outputs[id];
+    delete vars[id];
+  }
   if (oldBody && vars.prev === oldBody) delete vars.prev;
   return {
     ...ticket,
@@ -105,8 +121,8 @@ export function beginStageRun(
     sessionDir: undefined,
     outputs,
     vars,
-    fryComplete: column.id === FRY_COLUMN_ID ? false : ticket.fryComplete,
-    grillRounds: column.id === FRY_COLUMN_ID && !opts?.keepGrillRounds ? [] : ticket.grillRounds,
+    fryComplete: isFryStage(column.id) ? false : ticket.fryComplete,
+    fryRounds: isFryStage(column.id) && !opts?.keepFryRounds ? [] : ticket.fryRounds,
     plan: column.id === WRITE_PLAN_COLUMN_ID ? null : ticket.plan,
   };
 }

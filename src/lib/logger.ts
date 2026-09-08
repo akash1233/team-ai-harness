@@ -1,5 +1,5 @@
 /**
- * Kindling logger. Level from PIT_LOG_LEVEL (server) or VITE_PIT_LOG_LEVEL
+ * Kindling logger. Level from LOG_LEVEL (server) or VITE_LOG_LEVEL
  * (browser). Writes one line per event to the process/browser console and a
  * ring buffer that Settings → Execution → App log tails.
  *
@@ -89,8 +89,11 @@ export function getLogLevel(): LogLevel {
   const forced = store().forcedLevel;
   if (forced) return forced;
   return (
+    parseLogLevel(processEnv("LOG_LEVEL")) ??
     parseLogLevel(processEnv("PIT_LOG_LEVEL")) ??
+    parseLogLevel(processEnv("VITE_LOG_LEVEL")) ??
     parseLogLevel(processEnv("VITE_PIT_LOG_LEVEL")) ??
+    parseLogLevel(viteEnv("VITE_LOG_LEVEL")) ??
     parseLogLevel(viteEnv("VITE_PIT_LOG_LEVEL")) ??
     "info"
   );

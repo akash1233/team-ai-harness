@@ -1,6 +1,7 @@
-import type { GrillQuestion, TeamMember, Ticket } from "./types";
+import { FRY_COLUMN_ID } from "./columns.ts";
+import type { FryQuestion, TeamMember, Ticket } from "./types";
 
-export function assignQuestions(questions: GrillQuestion[], members: TeamMember[]): GrillQuestion[] {
+export function assignQuestions(questions: FryQuestion[], members: TeamMember[]): FryQuestion[] {
   if (members.length === 0) return questions;
   return questions.map((q, i) => ({
     ...q,
@@ -8,9 +9,13 @@ export function assignQuestions(questions: GrillQuestion[], members: TeamMember[
   }));
 }
 
-export function formatGrillRecord(ticket: Ticket): string {
-  if (ticket.grillRounds.length === 0) return ticket.outputs.fry || "";
-  const rounds = ticket.grillRounds
+export function fryConclusions(ticket: Pick<Ticket, "outputs">): string {
+  return (ticket.outputs[FRY_COLUMN_ID] || ticket.outputs.fry || "").trim();
+}
+
+export function formatFryRecord(ticket: Ticket): string {
+  if (ticket.fryRounds.length === 0) return fryConclusions(ticket);
+  const rounds = ticket.fryRounds
     .map((r, i) => {
       const qs = r.questions
         .map((q) => {
@@ -21,10 +26,10 @@ export function formatGrillRecord(ticket: Ticket): string {
       return `Round ${i + 1}${r.submitted ? "" : " (open)"}:\n${qs}`;
     })
     .join("\n\n");
-  const conclusions = ticket.fryComplete ? `\n\nConclusions:\n${ticket.outputs.fry || ""}` : "";
+  const conclusions = ticket.fryComplete ? `\n\nConclusions:\n${fryConclusions(ticket)}` : "";
   return `${rounds}${conclusions}`.trim();
 }
 
-export function answeredCount(questions: GrillQuestion[]): number {
+export function answeredCount(questions: FryQuestion[]): number {
   return questions.filter((q) => q.answer.trim().length > 0).length;
 }

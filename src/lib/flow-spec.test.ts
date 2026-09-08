@@ -37,7 +37,7 @@ const baseTicket: Ticket = {
     agenda: "",
   },
   agentResponses: [],
-  grillRounds: [],
+  fryRounds: [],
   fryComplete: false,
   plan: null,
   jiraCreated: [],
@@ -59,19 +59,20 @@ test("listFlowVariables documents the system catalog", () => {
   assert.ok(vars.jira);
   assert.ok(vars.slackMessage);
   assert.ok(vars["approved-agenda"]);
+  assert.ok(vars.fryme);
 });
 
 test("review stages write the approved previous output and have no agent prompt", () => {
   const agendaReview = getFlowStage("preview-agenda");
   const specReview = getFlowStage("preview-synthesize");
-  const fryReview = getFlowStage("preview-fry");
+  const fryReview = getFlowStage("preview-fryme");
   assert.equal(agendaReview?.role, "review");
   assert.deepEqual(agendaReview?.writes, ["approved-agenda", "prev"]);
   assert.equal(agendaReview?.prompt, undefined);
   assert.equal(specReview?.role, "review");
   assert.deepEqual(specReview?.writes, ["spec", "prev"]);
   assert.equal(fryReview?.role, "review");
-  assert.deepEqual(fryReview?.writes, ["grill", "prev"]);
+  assert.deepEqual(fryReview?.writes, ["fryme", "prev"]);
 });
 
 test("Agenda prompt contains brief and all linked Jiras only", () => {
@@ -136,7 +137,9 @@ test("Discovery Cursor/Claude stages declare print vs TUI", () => {
   assert.equal(getFlowStage("send-slack")?.cli, "tui");
   assert.equal(getFlowStage("file-jira")?.cli, "tui");
   assert.equal(getFlowStage("write-plan")?.cli, "print");
-  assert.equal(getFlowStage("fry")?.cli, "print");
+  assert.equal(getFlowStage("fryme")?.cli, "print");
+  assert.equal(getFlowStage("fry")?.id, "fryme");
+  assert.equal(getFlowStage("preview-fry")?.id, "preview-fryme");
   assert.equal(getFlowStage("prep-agenda")?.cli, "print");
   assert.equal(getFlowStage("synthesize")?.cli, "print");
 });
@@ -161,6 +164,14 @@ test("board columns match discovery.flow.json stages and omit Blocked", () => {
     columns.every((c) => !c.locked),
     true,
   );
+});
+
+test("legacy fry stage id still resolves the Fry Me prompt", () => {
+  const fromNew = resolveFlowStagePrompt("fryme", baseTicket);
+  const fromLegacy = resolveFlowStagePrompt("fry", baseTicket);
+  assert.ok(fromNew);
+  assert.equal(fromLegacy?.user, fromNew?.user);
+  assert.equal(fromLegacy?.system, fromNew?.system);
 });
 
 test("Spec prompt interpolates conversation and attached Jira from the flow JSON", () => {

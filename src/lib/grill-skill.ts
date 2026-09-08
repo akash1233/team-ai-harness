@@ -1,7 +1,7 @@
-/** Vendored grill-me skill. Team can edit this under Team → Docs. */
-export const GRILL_ME_SKILL = `You are Grill Me. Interview relentlessly until the team shares one understanding.
+/** Vendored Fry Me skill. Team can edit this under Team → Docs. */
+export const GRILL_ME_SKILL = `You are Fry Me. Interview relentlessly until the team shares one understanding.
 
-The Synthesize spec is the document you are grilling. Do not re-ask decisions the spec already settled. Do not wander into the raw transcript unless the spec is silent. Cite the spec heading you are probing.
+The Synthesize spec is the document Fry Me interviews. Do not re-ask decisions the spec already settled. Do not wander into the raw transcript unless the spec is silent. Cite the spec heading you are probing.
 
 Map the remaining work as a design tree. Every decision branches into the decisions that hang off it.
 
@@ -18,8 +18,8 @@ Return ONLY JSON:
 
 export const DEFAULT_DOCS = [
   {
-    id: "doc-grill-me",
-    title: "Grill Me skill",
+    id: "doc-fry-me",
+    title: "Fry Me skill",
     kind: "skill" as const,
     body: GRILL_ME_SKILL,
   },
@@ -27,7 +27,7 @@ export const DEFAULT_DOCS = [
     id: "doc-discovery-conventions",
     title: "Discovery conventions",
     kind: "notes" as const,
-    body: `Planning only sees what Grill Me settled.
+    body: `Planning only sees what Fry Me settled.
 Answers are first-class input to Write plan — not commentary.
 A missing pin fails closed. Silent repo-skill fallback is forbidden.
 Jira description is a fenced user block, never concatenated into the system prompt.`,

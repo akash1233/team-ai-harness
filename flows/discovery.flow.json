@@ -1,15 +1,18 @@
 {
   "id": "flow-discovery",
   "name": "Discovery",
-  "description": "Brief → agenda → notify → notes → spec → grill → backlog → file",
+  "description": "Brief → agenda → notify → notes → spec → fry me → backlog → file",
   "variables": {
     "brief": "Brief composed text from manual Save (Slack channel, ID, members, notes)",
     "agenda": "Full agenda document from Agenda stage",
     "approved-agenda": "Agenda after Approve Agenda (edited previous output)",
     "transcript": "Meeting notes from Notes stage",
     "spec": "Spec document from Spec stage",
-    "grill": "Grill Q&A record",
-    "fyyme": "Fry me Q&A record",
+    "fryme": "Fry Me Q&A record",
+    "grill": "Alias for fryme",
+    "fyyme": "Alias for fryme",
+    "frymePhase": "Fry Me round instruction (submit vs start)",
+    "grillPhase": "Alias for frymePhase",
     "plan": "Backlog plan JSON string",
     "slack_post": "Notify post summary after Slack MCP",
     "prev": "Last stage output",
@@ -35,7 +38,7 @@
     "ticket.description": "Ticket card description (user-typed only)",
     "ticket.labels": "Ticket labels comma-separated",
     "context": "Auto-aggregated var dump (opt-in only)",
-    "docs": "Attached skill documents (Grill)",
+    "docs": "Attached skill documents (Fry Me)",
     "input": "Generic manual capture"
   },
   "stages": [
@@ -105,21 +108,21 @@
       "role": "review"
     },
     {
-      "id": "fry",
-      "label": "Fryme Questionarre",
+      "id": "fryme",
+      "label": "Fry Me Questionnaire",
       "role": "prompt",
       "agent": "claude",
       "cli": "print",
-      "writes": ["grill", "prev"],
+      "writes": ["fryme", "prev"],
       "maxTokens": 1100,
       "prompt": {
-        "system": "Grill the spec. Return ONLY a JSON object in a json fence with shape:\n{\"frontierEmpty\": boolean, \"questions\": [{\"n\": 1, \"question\": \"...\", \"recommended\": \"...\", \"source\": \"spec\"}], \"conclusions\": \"markdown if frontierEmpty\"}\n3–6 questions per round. No interview small talk.\n\n{{docs}}",
-        "user": "Spec:\n{{spec}}\n\nTranscript (only if the spec is silent):\n{{transcript}}\n\nPrior grill:\n{{grill}}\n\n{{grillPhase}}"
+        "system": "Fry the spec. Return ONLY a JSON object in a json fence with shape:\n{\"frontierEmpty\": boolean, \"questions\": [{\"n\": 1, \"question\": \"...\", \"recommended\": \"...\", \"source\": \"spec\"}], \"conclusions\": \"markdown if frontierEmpty\"}\n3–6 questions per round. No interview small talk.\n\n{{docs}}",
+        "user": "Spec:\n{{spec}}\n\nTranscript (only if the spec is silent):\n{{transcript}}\n\nPrior Fry Me:\n{{fryme}}\n\n{{frymePhase}}"
       }
     },
     {
-      "id": "preview-fry",
-      "writes": ["grill", "prev"],
+      "id": "preview-fryme",
+      "writes": ["fryme", "prev"],
       "label": "Review Fry Me data",
       "role": "review"
     },
@@ -132,8 +135,8 @@
       "writes": ["plan", "prev"],
       "maxTokens": 1600,
       "prompt": {
-        "system": "Emit epics and stories only as JSON. steps[].title must start with \"Epic:\" or \"Story:\". Honor Grill Me answers as binding decisions.",
-        "user": "Spec:\n{{spec}}\n\nGrill:\n{{grill}}\n\nEmit <<<PLAN_JSON then JSON then PLAN_JSON>>>. A short prose summary may precede the fence."
+        "system": "Emit epics and stories only as JSON. steps[].title must start with \"Epic:\" or \"Story:\". Honor Fry Me answers as binding decisions.",
+        "user": "Spec:\n{{spec}}\n\nFry Me:\n{{fryme}}\n\nEmit <<<PLAN_JSON then JSON then PLAN_JSON>>>. A short prose summary may precede the fence."
       }
     },
     {

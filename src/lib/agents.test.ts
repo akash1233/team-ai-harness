@@ -31,7 +31,7 @@ test("inherit uses workspace default Cursor local", () => {
   assert.equal(step.label, "Cursor local");
 });
 
-test("Fryme column can pin Claude even when default is Cursor", () => {
+test("Fry Me column can pin Claude even when default is Cursor", () => {
   const step = resolveStep({ agent: "claude" }, exec);
   assert.equal(step.kind, "claude");
   assert.equal(step.label, "Claude local");

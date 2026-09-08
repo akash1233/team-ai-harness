@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import {
   APP_ENV_REL_PATH,
   mergeAppEnv,
-  mirrorPitLogLevel,
+  mirrorLogLevel,
   parseAppEnv,
   projectRoot,
   readAppEnv,
@@ -51,11 +51,13 @@ test("reads the app env from a workspace", () => {
   assert.deepEqual(readAppEnv(root), { VITE_AUTH_ENABLED: "false" });
 });
 
-test("mirrorPitLogLevel copies PIT_LOG_LEVEL into VITE_PIT_LOG_LEVEL", () => {
-  const mirrored = mirrorPitLogLevel({ PIT_LOG_LEVEL: "debug", PATH: "/usr/bin" });
-  assert.equal(mirrored.VITE_PIT_LOG_LEVEL, "debug");
-  const kept = mirrorPitLogLevel({ PIT_LOG_LEVEL: "debug", VITE_PIT_LOG_LEVEL: "error" });
-  assert.equal(kept.VITE_PIT_LOG_LEVEL, "error");
+test("mirrorLogLevel copies LOG_LEVEL into VITE_LOG_LEVEL", () => {
+  const mirrored = mirrorLogLevel({ LOG_LEVEL: "debug", PATH: "/usr/bin" });
+  assert.equal(mirrored.VITE_LOG_LEVEL, "debug");
+  const kept = mirrorLogLevel({ LOG_LEVEL: "debug", VITE_LOG_LEVEL: "error" });
+  assert.equal(kept.VITE_LOG_LEVEL, "error");
+  const legacy = mirrorLogLevel({ PIT_LOG_LEVEL: "warn" });
+  assert.equal(legacy.VITE_LOG_LEVEL, "warn");
 });
 
 test("an explicit process-env override wins over the file", () => {

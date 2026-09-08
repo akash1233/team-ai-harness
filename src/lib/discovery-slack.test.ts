@@ -30,7 +30,7 @@ function ticket(partial: Partial<Ticket> = {}): Ticket {
     outputs: {},
     vars: {},
     agentResponses: [],
-    grillRounds: [],
+    fryRounds: [],
     jiraCreated: [],
     fryComplete: false,
     plan: null,

@@ -128,7 +128,7 @@ export type AgentResponse = {
   usage?: TokenUsage;
 };
 
-export type GrillQuestion = {
+export type FryQuestion = {
   n: number;
   question: string;
   recommended: string;
@@ -139,9 +139,9 @@ export type GrillQuestion = {
   answeredAt?: string;
 };
 
-export type GrillRound = {
+export type FryRound = {
   id: string;
-  questions: GrillQuestion[];
+  questions: FryQuestion[];
   submitted: boolean;
 };
 
@@ -278,7 +278,7 @@ export type Ticket = {
   /** Named values published by completed stages. Prompts read these as {{name}}. */
   vars: Record<string, string>;
   agentResponses: AgentResponse[];
-  grillRounds: GrillRound[];
+  fryRounds: FryRound[];
   fryComplete: boolean;
   plan: Plan | null;
   jiraCreated: JiraIssue[];

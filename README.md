@@ -1,6 +1,6 @@
 # Kindling
 
-Spark to spec. A team workspace that runs a Discovery pipeline with **Cursor**, **Claude**, **GenAI Studio**, or **CIS**. Stages publish variables. Grill Me interviews the spec. Spend is token-priced.
+Spark to spec. A team workspace that runs a Discovery pipeline with **Cursor**, **Claude**, **GenAI Studio**, or **CIS**. Stages publish variables. Fry Me interviews the spec. Spend is token-priced.
 
 Repo: [github.com/akash1233/team-ai-harness](https://github.com/akash1233/team-ai-harness)
 
@@ -20,7 +20,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:8080](http://localhost:8080). Chrome or Edge for Grill Me voice.
+Open [http://localhost:8080](http://localhost:8080). Chrome or Edge for Fry Me voice.
 
 Click the green **Settings** control in the header. Every workspace option lives there.
 
@@ -36,8 +36,8 @@ The **Settings** gear in the header is the control plane. Nothing about the pipe
 | **Prompts** | Prompt library. Add prompt, paste skills into the body, or attach Skills. Stages pick one |
 | **Skills** | Skill/doc library. Prompts check which skills to append on run |
 | **Connect** | Jira + GitHub Enterprise hosts and **PATs**. Sync issues/repos; drop a key or repo on a ticket (`{{jira.key}}`, `{{repo}}`) |
-| **Prompts** | Prompt templates (`{{spec}}`, `{{grill}}`, …) and per-stage Studio prompt IDs |
-| **Docs** | Grill Me skill + notes the grill reads |
+| **Prompts** | Prompt templates (`{{spec}}`, `{{fryme}}`, …) and per-stage Studio prompt IDs |
+| **Docs** | Fry Me skill + notes Fry Me reads |
 | **Execution** | Default agent, Cursor/Claude local vs remote, Studio/CIS, **Test Cursor / Test Claude**, MCP list, **token pricing** |
 | **Look** | Vertical vs horizontal board, theme, density, show spend |
 
@@ -106,23 +106,23 @@ Each stage publishes a named value. Later prompts interpolate it **only when the
 | `{{agenda}}` | Agenda |
 | `{{transcript}}` | Meeting notes |
 | `{{spec}}` | Synthesize |
-| `{{grill}}` | Grill Me answers |
+| `{{fryme}}` | Fry Me answers |
 | `{{plan}}` | Backlog plan |
 | `{{prev}}` | Previous stage output |
 | `{{ticket.title}}` | Ticket fields |
 
-With **Keep running agent stages** on, a successful run skips review gates and starts the next agent until notes, Grill questions, or sign-off.
+With **Keep running agent stages** on, a successful run skips review gates and starts the next agent until notes, Fry Me questions, or sign-off.
 
 ## Per-stage agents
 
 **Settings → Pipeline** pins the agent on each runnable stage for this session only. **Inherit** uses the workspace default. Boot-time defaults come from the flow JSON.
 
-Discovery **continues into Quick spec** when a ticket hits Done (Settings → Flows). Vars travel with the ticket. Spec on Quick spec is Studio again, with the same `{{brief}}` `{{spec}}` `{{grill}}`.
+Discovery **continues into Quick spec** when a ticket hits Done (Settings → Flows). Vars travel with the ticket. Spec on Quick spec is Studio again, with the same `{{brief}}` `{{spec}}` `{{fryme}}`.
 
-## Grill Me
+## Fry Me
 
 1. Run **Spec**.
-2. Open **Grill**. Start grill — questions come from the spec plus **Settings → Docs**.
+2. Open **Fry Me**. Start Fry Me — questions come from the spec plus **Settings → Docs**.
 3. Header **Working as** is who you are. Answer: type, rec, or mic.
 4. Submit the round. Write plan treats those answers as binding.
 
@@ -134,7 +134,7 @@ src/components/studio/           Board chrome
   StageRail.tsx / TicketList.tsx Vertical pipeline
   PipelineBoard.tsx / TicketNote Horizontal sticky-note board
   RunLog.tsx                     Agent output + spend + tokens
-  GrillRoom.tsx                  Collaborative grill
+  GrillRoom.tsx                  Collaborative Fry Me
   settings/                      Settings tabs helpers
     field.tsx                    Shared fields
     PricingFields.tsx            Token rates UI
@@ -149,7 +149,7 @@ src/lib/
   execution.server.ts            Spawn CLI, HTTP, Studio, CIS
   pricing.ts                     Token usage + USD
   discovery-agent.ts             Per-stage prompts → runModel
-  grill.ts / grill-skill.ts      Grill parse + skill doc
+  grill.ts / grill-skill.ts      Fry Me parse + skill doc
   board-store.ts                 Zustand persistence
 ```
 

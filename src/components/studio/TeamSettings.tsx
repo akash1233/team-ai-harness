@@ -213,7 +213,7 @@ function TeamTab() {
       <section>
         <h3 className="mb-2 text-sm font-medium">People</h3>
         <p className="mb-2 text-2xs text-muted">
-          Edit names, Slack handles, and roles. They drive Working as, Grill assignment, and who to notify.
+          Edit names, Slack handles, and roles. They drive Working as, Fry Me assignment, and who to notify.
         </p>
         <ul className="flex flex-col gap-2">
           {config.members.map((m) => (
@@ -408,7 +408,7 @@ function FlowsTab() {
         </select>
       </Field>
       <p className="text-2xs text-muted">
-        Edit stages for <span className="text-fg">{flow.name}</span> on the Pipeline tab. Prompts may use {"{{brief}}"} {"{{spec}}"} {"{{grill}}"} {"{{plan}}"} {"{{transcript}}"} {"{{prev}}"} {"{{ticket.title}}"}.
+        Edit stages for <span className="text-fg">{flow.name}</span> on the Pipeline tab. Prompts may use {"{{brief}}"} {"{{spec}}"} {"{{fryme}}"} {"{{plan}}"} {"{{transcript}}"} {"{{prev}}"} {"{{ticket.title}}"}.
       </p>
     </div>
   );
@@ -898,7 +898,7 @@ function DocsTab() {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
-        Grill Me and any prompt can read these. Attach a skill to a prompt on the Prompts tab, or paste the skill body into the prompt itself.
+        Fry Me and any prompt can read these. Attach a skill to a prompt on the Prompts tab, or paste the skill body into the prompt itself.
       </p>
       {docs.map((doc) => (
         <section key={doc.id} className="rounded-md border border-border p-3">
@@ -917,7 +917,7 @@ function DocsTab() {
               <option value="notes">notes</option>
               <option value="spec">spec</option>
             </select>
-            {doc.id.startsWith("doc-") && doc.id !== "doc-grill-me" ? (
+            {doc.id.startsWith("doc-") && doc.id !== "doc-fry-me" ? (
               <button
                 type="button"
                 className="flex size-11 items-center justify-center rounded-md text-subtle hover:text-danger"
@@ -1062,13 +1062,13 @@ function AppConsoleLog({
                 : `Fail · ${probe.via}`
             : null}
           {probe ? " · " : null}
-          <span className="font-mono">PIT_LOG_LEVEL={level}</span>
+          <span className="font-mono">LOG_LEVEL={level}</span>
         </span>
       </div>
       <p className="text-2xs text-muted">
         Every execution call (Cursor, Claude, HTTP, WebLLM, tests) writes here.{" "}
         <span className="font-mono">debug</span> includes info, warn, and error. Set{" "}
-        <span className="font-mono">PIT_LOG_LEVEL</span> in <span className="font-mono">.env</span>, then restart{" "}
+        <span className="font-mono">LOG_LEVEL</span> in <span className="font-mono">.env</span>, then restart{" "}
         <span className="font-mono">npm run dev</span>.
       </p>
       {probe?.checks?.length ? (

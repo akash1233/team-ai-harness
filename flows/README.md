@@ -6,7 +6,7 @@ Kindling stage lists, agents, prompts, and variable contracts live here as JSON.
 
 **File:** [`discovery.flow.json`](./discovery.flow.json)
 
-Stages: Brief → Agenda → Review agenda → Notify → Notes → Spec → Grill → Backlog → File → Done.
+Stages: Brief → Agenda → Review agenda → Notify → Notes → Spec → Fry Me → Backlog → File → Done.
 
 Loader: [`src/lib/flow-spec.ts`](../src/lib/flow-spec.ts) (`columnsFromFlowSpec`, `resolveFlowStagePrompt`, `listFlowVariables`). There is no extra hardcoded Blocked column.
 
@@ -22,7 +22,7 @@ Use any token below in a stage `prompt.system` or `prompt.user` string. If a tok
 | `{{agenda}}` | Full agenda document | Agenda Run |
 | `{{transcript}}` | Meeting notes | Notes Save |
 | `{{spec}}` | Spec document | Spec Run |
-| `{{grill}}` | Grill Q&A record | Grill rounds / harvest |
+| `{{fryme}}` | Fry Me Q&A record | Fry Me rounds / harvest |
 | `{{plan}}` | Backlog plan JSON string | Backlog Run |
 | `{{slack_post}}` | Notify post summary | After Slack MCP |
 | `{{prev}}` | Last stage output | Every harvest |
@@ -64,9 +64,9 @@ Use any token below in a stage `prompt.system` or `prompt.user` string. If a tok
 | Token | Description |
 | --- | --- |
 | `{{context}}` | Auto-aggregated dump of filled vars — use only if the prompt names it |
-| `{{docs}}` | Attached skill documents (Grill) |
+| `{{docs}}` | Attached skill documents (Fry Me) |
 | `{{input}}` | Generic manual capture |
-| `{{grillPhase}}` | Grill round instruction (submit vs start) — Grill stage only |
+| `{{frymePhase}}` | Fry Me round instruction (submit vs start) — Fry Me stage only |
 
 ## Designing a new stage prompt
 

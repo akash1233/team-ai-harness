@@ -11,14 +11,14 @@ test("Notify column defaults to Cursor with slackMessage prompt", () => {
   assert.match(notify?.promptTemplate ?? "", /slack-mcp/);
 });
 
-test("default prompts seed from stages and Grill attaches grill-me skill", () => {
+test("default prompts seed from stages and Fry Me attaches grill-me skill", () => {
   const prompts = createDefaultPrompts(COLUMNS);
   const agenda = prompts.find((p) => p.id === `prompt-${PREP_AGENDA_COLUMN_ID}`);
   const grill = prompts.find((p) => p.id === `prompt-${FRY_COLUMN_ID}`);
   const notify = prompts.find((p) => p.id === `prompt-${SEND_SLACK_COLUMN_ID}`);
   assert.ok(agenda?.body.includes("Team Discussion Agenda"));
   assert.match(notify?.body ?? "", /\{\{slackMessage\}\}/);
-  assert.deepEqual(grill?.skillIds, ["doc-grill-me"]);
+  assert.deepEqual(grill?.skillIds, ["doc-fry-me"]);
 });
 
 test("mergePrompts migrates stale Notify prompt body to canonical template", () => {
@@ -43,11 +43,29 @@ test("resolveStagePrompt appends attached skills into the body", () => {
   const col = COLUMNS.find((c) => c.id === FRY_COLUMN_ID)!;
   const prompts = createDefaultPrompts(COLUMNS);
   const docs: TeamDoc[] = [
-    { id: "doc-grill-me", title: "grill-me", kind: "skill", body: "Interview relentlessly." },
+    { id: "doc-fry-me", title: "fry-me", kind: "skill", body: "Interview relentlessly." },
   ];
   const resolved = resolveStagePrompt({ ...col, promptRef: `prompt-${FRY_COLUMN_ID}` }, prompts, docs);
   assert.match(resolved.body, /Interview relentlessly/);
-  assert.match(resolved.body, /<skill name="grill-me">/);
+  assert.match(resolved.body, /<skill name="fry-me">/);
+});
+
+test("legacy Grill Me prompt and skill ids still resolve after the Fry Me rename", () => {
+  const col = COLUMNS.find((c) => c.id === FRY_COLUMN_ID)!;
+  const prompts = mergePrompts(
+    [{ id: "prompt-fry", name: "Grill Me", body: "legacy fry prompt", skillIds: ["doc-grill-me"], jiraKeys: [] }],
+    COLUMNS,
+  );
+  const grill = prompts.find((p) => p.id === `prompt-${FRY_COLUMN_ID}`);
+  assert.ok(grill);
+  assert.deepEqual(grill?.skillIds, ["doc-fry-me"]);
+  const resolved = resolveStagePrompt(
+    { ...col, promptRef: "prompt-fry" },
+    [{ id: "prompt-fry", name: "Grill Me", body: "legacy fry prompt", skillIds: ["doc-grill-me"], jiraKeys: [] }],
+    [{ id: "doc-grill-me", title: "grill-me", kind: "skill", body: "Interview relentlessly." }],
+  );
+  assert.match(resolved.body, /legacy fry prompt/);
+  assert.match(resolved.body, /Interview relentlessly/);
 });
 
 test("resolveStagePrompt carries prompt-bound Jira keys", () => {

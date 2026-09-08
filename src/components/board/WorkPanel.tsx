@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
-import { columnById } from "@/lib/columns";
+import { columnById, isFryStage } from "@/lib/columns";
 import { buildContext, outputVarName, reviewSourceText } from "@/lib/flow-context";
 import { flowStageMentionedKeys, getFlowStage } from "@/lib/flow-spec";
 import { formatSpend } from "@/lib/format";
@@ -229,7 +229,7 @@ function StepBody({ ticket }: { ticket: Ticket }) {
   if (col.role === "review" || col.role === "approve") {
     return <ReviewForm key={`${ticket.id}:${ticket.columnId}`} ticket={ticket} />;
   }
-  if (col.id === "fry") return <GrillRoom ticket={ticket} />;
+  if (isFryStage(col.id)) return <GrillRoom ticket={ticket} />;
   if (col.id === "write-plan") return <PlanForm ticket={ticket} />;
   if (col.id === "file-jira") return <JiraForm ticket={ticket} />;
   if (col.role === "prompt" || col.role === "plan") return <RunForm ticket={ticket} />;
@@ -566,7 +566,7 @@ function PlanForm({ ticket }: { ticket: Ticket }) {
   const payload = useStagePayload(ticket);
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted">Epics and stories only. Grill Me answers from the spec are binding input.</p>
+      <p className="text-sm text-muted">Epics and stories only. Fry Me answers from the spec are binding input.</p>
       {ticket.plan ? <PlanPreview ticket={ticket} /> : null}
       <PayloadEditor
         payload={payload.payload}

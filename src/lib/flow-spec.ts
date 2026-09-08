@@ -1,5 +1,6 @@
 import discoveryFlowJson from "../../flows/discovery.flow.json" with { type: "json" };
 import { isAgentKind } from "./agents.ts";
+import { FRY_COLUMN_ID, migrateColumnId } from "./columns.ts";
 import { buildContext, interpolate, mentionedKeys } from "./flow-context.ts";
 import type { StepAgent, TeamDoc, Ticket, WebllmProfile } from "./types.ts";
 import { isWebllmProfile } from "./webllm.ts";
@@ -40,7 +41,8 @@ export function loadDiscoveryFlowSpec(): FlowSpec {
 export function clearFlowSpecCache(): void {}
 
 export function getFlowStage(stageId: string, flow: FlowSpec = loadDiscoveryFlowSpec()): FlowStageSpec | undefined {
-  return flow.stages.find((s) => s.id === stageId);
+  const wanted = migrateColumnId(stageId);
+  return flow.stages.find((s) => s.id === wanted);
 }
 
 /** JSON-backed stage agent (manual | cursor | claude | studio | cis | webllm). */
@@ -71,13 +73,14 @@ export function flowStageMentionedKeys(stage: FlowStageSpec | undefined): string
 export function validateStagePrompt(stage: FlowStageSpec, flow: FlowSpec = loadDiscoveryFlowSpec()): string[] {
   const catalog = new Set(Object.keys(flow.variables));
   catalog.add("grillPhase");
+  catalog.add("frymePhase");
   return flowStageMentionedKeys(stage).filter((key) => !catalog.has(key) && !key.startsWith("jira."));
 }
 
-function grillPhase(ticket: Ticket, grillSubmit?: boolean): string {
-  return grillSubmit || ticket.grillRounds.some((r) => r.submitted)
+function frymePhase(ticket: Ticket, frySubmit?: boolean): string {
+  return frySubmit || ticket.fryRounds.some((r) => r.submitted)
     ? "The team answered the last round. Either ask the next frontier against the spec, or if the tree is settled, set frontierEmpty true and write conclusions planning must honor."
-    : "Start round 1. Grill the Synthesize spec. Ask the whole frontier. One recommended answer per question.";
+    : "Start round 1. Fry the Synthesize spec. Ask the whole frontier. One recommended answer per question.";
 }
 
 const DEFAULT_MAX_TOKENS = 4000;
@@ -95,14 +98,16 @@ export function resolveFlowStagePrompt(
   stageId: string,
   ticket: Ticket,
   docs?: TeamDoc[],
-  opts?: { grillSubmit?: boolean; promptTemplate?: string },
+  opts?: { frySubmit?: boolean; promptTemplate?: string },
 ): { system: string; user: string; max: number } | undefined {
   const stage = getFlowStage(stageId);
   const live = opts?.promptTemplate?.trim() || undefined;
   const jsonBody = jsonPromptBody(stage);
   const ctx = buildContext(ticket, docs);
-  if (stageId === "fry") {
-    ctx.grillPhase = grillPhase(ticket, opts?.grillSubmit);
+  if (stage?.id === FRY_COLUMN_ID) {
+    const phase = frymePhase(ticket, opts?.frySubmit);
+    ctx.frymePhase = phase;
+    ctx.grillPhase = phase;
   }
   const max = stage?.maxTokens ?? DEFAULT_MAX_TOKENS;
   const defaultSystem = "Produce a concise operator-facing result.";

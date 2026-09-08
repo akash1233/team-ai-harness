@@ -1,6 +1,14 @@
-import { FRY_COLUMN_ID, IDEATION_COLUMN_ID, previousColumn, SEND_SLACK_COLUMN_ID, TRANSCRIPT_COLUMN_ID } from "./columns.ts";
+import {
+  FRY_COLUMN_ID,
+  IDEATION_COLUMN_ID,
+  isFryStage,
+  migrateColumnId,
+  previousColumn,
+  SEND_SLACK_COLUMN_ID,
+  TRANSCRIPT_COLUMN_ID,
+} from "./columns.ts";
 import { composeSlackMessage, normalizeSlackChannelName, resolveAgendaDocument } from "./discovery-slack.ts";
-import { formatGrillRecord } from "./grill.ts";
+import { formatFryRecord } from "./grill.ts";
 import type { TeamDoc, Ticket, WorkflowColumn } from "./types";
 
 const TOKEN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
@@ -26,6 +34,17 @@ export function outputVarName(column: { id?: string; outputKey?: string } | unde
   return (column.id ?? "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
 
+/** Keep pre-rename Fry Me tokens populated so old prompts still interpolate. */
+export function applyFryAliases(vars: Record<string, string>, body: string): Record<string, string> {
+  const text = body.trim();
+  if (!text) return vars;
+  vars.fryme = text;
+  vars.grill = text;
+  vars.fyyme = text;
+  vars.fry = text;
+  return vars;
+}
+
 export function harvestVars(
   ticket: Ticket,
   column: WorkflowColumn | undefined,
@@ -35,8 +54,11 @@ export function harvestVars(
   const body = text.trim();
   if (!body || !column) return vars;
   const name = outputVarName(column);
+  const canonicalId = migrateColumnId(column.id);
   vars[column.id] = body;
+  vars[canonicalId] = body;
   if (name) vars[name] = body;
+  if (isFryStage(column.id) || name === "fryme" || name === "grill") applyFryAliases(vars, body);
   vars.prev = body;
   return vars;
 }
@@ -50,9 +72,16 @@ export function reviewSourceText(
   if (!reviewColumn) return "";
   const source = previousColumn(reviewColumn.id, columns);
   if (source) {
-    if (source.id === FRY_COLUMN_ID || source.outputKey === "grill") {
-      const grill = formatGrillRecord(ticket) || ticket.outputs[source.id] || ticket.vars?.grill || "";
-      if (grill.trim()) return grill.trim();
+    if (isFryStage(source.id) || source.outputKey === "fryme" || source.outputKey === "grill") {
+      const fryme =
+        formatFryRecord(ticket) ||
+        ticket.outputs[FRY_COLUMN_ID] ||
+        ticket.outputs[source.id] ||
+        ticket.outputs.fry ||
+        ticket.vars?.fryme ||
+        ticket.vars?.grill ||
+        "";
+      if (fryme.trim()) return fryme.trim();
     }
     if ((source.role === "plan" || source.outputKey === "plan") && ticket.plan) {
       return JSON.stringify(ticket.plan, null, 2);
@@ -83,7 +112,9 @@ export function harvestReviewVars(
   if (!body || !sourceColumn) return vars;
   const sourceKey = outputVarName(sourceColumn);
   vars[sourceColumn.id] = body;
+  vars[migrateColumnId(sourceColumn.id)] = body;
   if (sourceKey) vars[sourceKey] = body;
+  if (isFryStage(sourceColumn.id) || sourceKey === "fryme" || sourceKey === "grill") applyFryAliases(vars, body);
   return vars;
 }
 
@@ -180,7 +211,7 @@ export function readManualOutput(ticket: Ticket, column: WorkflowColumn): string
 }
 
 export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, string> {
-  const grill = formatGrillRecord(ticket);
+  const fryme = formatFryRecord(ticket);
   const jiras = ticket.linkedJiras ?? [];
   const ctx: Record<string, string> = {
     "ticket.key": ticket.key,
@@ -193,7 +224,10 @@ export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, s
     agenda: "",
     transcript: "",
     spec: "",
+    fryme: "",
     grill: "",
+    fyyme: "",
+    fry: "",
     plan: "",
     jira: "",
     repo: "",
@@ -220,7 +254,18 @@ export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, s
   ctx.slackMessage = ctx.slackMessage || composeSlackMessage(ticket, agendaDoc) || "";
   ctx.transcript = ctx.transcript || ticket.transcript || ticket.outputs.transcript || "";
   ctx.spec = ctx.spec || ticket.outputs.synthesize || "";
-  ctx.grill = grill || ctx.grill || ticket.outputs.fry || "";
+  ctx.fryme =
+    fryme ||
+    ctx.fryme ||
+    ctx.grill ||
+    ctx.fyyme ||
+    ctx.fry ||
+    ticket.outputs[FRY_COLUMN_ID] ||
+    ticket.outputs.fry ||
+    "";
+  ctx.grill = ctx.fryme;
+  ctx.fyyme = ctx.fryme;
+  ctx.fry = ctx.fryme;
   ctx.plan =
     ctx.plan ||
     (ticket.plan ? JSON.stringify(ticket.plan, null, 2) : "") ||

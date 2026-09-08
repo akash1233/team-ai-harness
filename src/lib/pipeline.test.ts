@@ -27,7 +27,7 @@ function ticket(over: Partial<Ticket> = {}): Ticket {
     outputs: {},
     vars: {},
     agentResponses: [],
-    grillRounds: [],
+    fryRounds: [],
     fryComplete: false,
     plan: null,
     jiraCreated: [],
@@ -42,7 +42,7 @@ test("Discovery agents: agenda Cursor print, spec Cursor print, plan Cursor", ()
   const plan = COLUMNS.find((c) => c.id === WRITE_PLAN_COLUMN_ID);
   const notify = COLUMNS.find((c) => c.id === "send-slack");
   const fileJira = COLUMNS.find((c) => c.id === "file-jira");
-  const fry = COLUMNS.find((c) => c.id === "fry");
+  const fry = COLUMNS.find((c) => c.id === "fryme");
   assert.equal(agenda?.agent, "cursor");
   assert.equal(agenda?.cli, "print");
   assert.equal(agenda?.webllmProfile, undefined);
@@ -150,4 +150,24 @@ test("beginStageRun drops this stage's last output so a new run starts blank", (
   assert.equal(started.vars.spec, "keep spec");
   assert.equal(started.vars.brief, "keep brief");
   assert.equal(started.vars.prev, undefined);
+});
+
+test("beginStageRun on Fry Me also clears legacy fry/grill keys", () => {
+  const col = COLUMNS.find((c) => c.id === "fryme")!;
+  const started = beginStageRun(
+    ticket({
+      columnId: "fryme",
+      outputs: { fryme: "new conclusions", fry: "old conclusions", synthesize: "keep spec" },
+      vars: { fryme: "new conclusions", grill: "old record", fry: "old record", spec: "keep spec" },
+    }),
+    col,
+  );
+  assert.equal(started.outputs.fryme, undefined);
+  assert.equal(started.outputs.fry, undefined);
+  assert.equal(started.outputs.synthesize, "keep spec");
+  assert.equal(started.vars.fryme, undefined);
+  assert.equal(started.vars.grill, undefined);
+  assert.equal(started.vars.fry, undefined);
+  assert.equal(started.vars.spec, "keep spec");
+  assert.equal(started.fryComplete, false);
 });

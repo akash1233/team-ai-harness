@@ -26,7 +26,7 @@ export const WEBLLM_PROFILES: readonly WebllmProfileSpec[] = [
     modelId: "Qwen3-4B-q4f16_1-MLC",
     vramMb: 3432,
     contextTokens: 4096,
-    summary: "4B · default · grill JSON and backlog",
+    summary: "4B · default · Fry Me JSON and backlog",
   },
   {
     id: "quality",

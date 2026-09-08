@@ -3,25 +3,25 @@ import { Mic, Play, RotateCw, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { useBoardStore } from "@/lib/board-store";
-import { answeredCount } from "@/lib/grill";
+import { answeredCount, fryConclusions } from "@/lib/grill";
 import { resolveStep } from "@/lib/agents";
 import { FRY_COLUMN_ID, columnById } from "@/lib/columns";
 import { useVoice } from "@/lib/use-voice";
 import { cn } from "@/lib/cn";
-import type { GrillQuestion, Ticket } from "@/lib/types";
+import type { FryQuestion, Ticket } from "@/lib/types";
 import { PayloadEditor, useStagePayload } from "./PayloadEditor";
 
 export function GrillRoom({ ticket }: { ticket: Ticket }) {
   const runTicket = useBoardStore((s) => s.runTicket);
-  const submitGrill = useBoardStore((s) => s.submitGrill);
-  const patchGrillQuestion = useBoardStore((s) => s.patchGrillQuestion);
+  const submitFry = useBoardStore((s) => s.submitFry);
+  const patchFryQuestion = useBoardStore((s) => s.patchFryQuestion);
   const members = useBoardStore((s) => s.config.members);
   const docs = useBoardStore((s) => s.config.docs);
   const execution = useBoardStore((s) => s.config.execution);
   const columns = useBoardStore((s) => s.config.columns);
   const activeMemberId = useBoardStore((s) => s.activeMemberId);
   const busy = ticket.status === "executing";
-  const openRound = [...ticket.grillRounds].reverse().find((r) => !r.submitted);
+  const openRound = [...ticket.fryRounds].reverse().find((r) => !r.submitted);
   const spec = ticket.outputs.synthesize || "";
   const col = columnById(FRY_COLUMN_ID, columns);
   const step = resolveStep(col, execution);
@@ -36,7 +36,7 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted">
-          Grill the spec from Synthesize. {step.label} runs the Grill Me skill. The team answers every question — typed or spoken. Those answers are what Write plan reads.
+          Fry the spec from Synthesize. {step.label} runs the Fry Me skill. The team answers every question — typed or spoken. Those answers are what Write plan reads.
         </p>
         <SpecBlock spec={spec} />
         <DocsLine docs={docs} />
@@ -56,17 +56,18 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
           onClick={() => void runTicket(ticket.id, payload.payload ?? undefined)}
         >
           {busy ? <RotateCw className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
-          {busy ? "Grilling…" : `Start grill · ${step.label}`}
+          {busy ? "Running Fry Me…" : `Start Fry Me · ${step.label}`}
         </Button>
       </div>
     );
   }
 
   if (ticket.fryComplete) {
+    const conclusions = fryConclusions(ticket);
     return (
       <div className="flex flex-col gap-3">
         <p className="text-micro uppercase tracking-wider text-subtle">Settled — feeds Write plan</p>
-        {ticket.grillRounds.map((r, i) => (
+        {ticket.fryRounds.map((r, i) => (
           <div key={r.id}>
             <p className="text-micro text-subtle">Round {i + 1}</p>
             <ul className="mt-1 flex flex-col gap-2">
@@ -80,9 +81,9 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
             </ul>
           </div>
         ))}
-        {ticket.outputs.fry ? (
+        {conclusions ? (
           <pre className="whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
-            {ticket.outputs.fry}
+            {conclusions}
           </pre>
         ) : null}
       </div>
@@ -92,16 +93,16 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
   if (!openRound) return null;
   const round = openRound;
 
-  function save(q: GrillQuestion, patch: Partial<GrillQuestion>) {
-    patchGrillQuestion(ticket.id, round.id, q.n, patch);
+  function save(q: FryQuestion, patch: Partial<FryQuestion>) {
+    patchFryQuestion(ticket.id, round.id, q.n, patch);
   }
 
-  function speakQuestion(q: GrillQuestion) {
+  function speakQuestion(q: FryQuestion) {
     setVoiceCursor(q.n);
     voice.speak(`${q.n}. ${q.question}. Recommended: ${q.recommended}`);
   }
 
-  function dictate(q: GrillQuestion) {
+  function dictate(q: FryQuestion) {
     setVoiceCursor(q.n);
     voice.listen((text) => {
       const next = [q.answer, text].filter(Boolean).join(" ").trim();
@@ -121,7 +122,7 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
       <SpecBlock spec={spec} compact />
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-micro uppercase tracking-wider text-subtle">
-          Round {ticket.grillRounds.length} · {done}/{total} answered · {step.label}
+          Round {ticket.fryRounds.length} · {done}/{total} answered · {step.label}
         </p>
         <button
           type="button"
@@ -225,7 +226,7 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
             for (const q of round.questions) {
               payload[q.n] = (q.answer || q.recommended).trim();
             }
-            void submitGrill(ticket.id, payload);
+            void submitFry(ticket.id, payload);
           }}
         >
           {busy ? <RotateCw className="size-3.5 animate-spin" /> : null}
@@ -239,7 +240,7 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
 function SpecBlock({ spec, compact }: { spec: string; compact?: boolean }) {
   const [open, setOpen] = useState(!compact);
   if (!spec) {
-    return <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted">No spec yet. Run Synthesize first so Grill Me has a document to talk to.</p>;
+    return <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted">No spec yet. Run Synthesize first so Fry Me has a document to talk to.</p>;
   }
   return (
     <div className="rounded-md border border-border bg-elevated">

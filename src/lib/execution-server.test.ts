@@ -3,39 +3,48 @@ import { test } from "node:test";
 import { isGrokAgentPath, resolveExecution } from "./execution.server.ts";
 
 function withEnv(key: string, value: string | undefined, fn: () => void) {
-  const prev = process.env[key];
-  if (value === undefined) delete process.env[key];
-  else process.env[key] = value;
+  const keys = key.startsWith("PIT_") ? [key] : [key, `PIT_${key}`];
+  const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  for (const k of keys) {
+    if (k === key) {
+      if (value === undefined) delete process.env[k];
+      else process.env[k] = value;
+    } else if (value === undefined) {
+      delete process.env[k];
+    }
+  }
   try {
     fn();
   } finally {
-    if (prev === undefined) delete process.env[key];
-    else process.env[key] = prev;
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
   }
 }
 
 test("resolveExecution defaults stageTimeoutMs to 5 minutes", () => {
-  withEnv("PIT_STAGE_TIMEOUT_MS", undefined, () => {
+  withEnv("STAGE_TIMEOUT_MS", undefined, () => {
     assert.equal(resolveExecution().stageTimeoutMs, 300000);
   });
 });
 
-test("resolveExecution reads PIT_STAGE_TIMEOUT_MS", () => {
-  withEnv("PIT_STAGE_TIMEOUT_MS", "600000", () => {
+test("resolveExecution reads STAGE_TIMEOUT_MS", () => {
+  withEnv("STAGE_TIMEOUT_MS", "600000", () => {
     assert.equal(resolveExecution().stageTimeoutMs, 600000);
   });
 });
 
 test("resolveExecution keeps client stageTimeoutMs when env is unset", () => {
-  withEnv("PIT_STAGE_TIMEOUT_MS", undefined, () => {
+  withEnv("STAGE_TIMEOUT_MS", undefined, () => {
     const exec = resolveExecution({ ...resolveExecution(), stageTimeoutMs: 420000 });
     assert.equal(exec.stageTimeoutMs, 420000);
   });
 });
 
-test("resolveExecution accepts PIT_DEFAULT_AGENT=webllm and profile", () => {
-  withEnv("PIT_DEFAULT_AGENT", "webllm", () => {
-    withEnv("PIT_WEBLLM_PROFILE", "fast", () => {
+test("resolveExecution accepts DEFAULT_AGENT=webllm and profile", () => {
+  withEnv("DEFAULT_AGENT", "webllm", () => {
+    withEnv("WEBLLM_PROFILE", "fast", () => {
       const exec = resolveExecution();
       assert.equal(exec.defaultAgent, "webllm");
       assert.equal(exec.webllmProfile, "fast");
@@ -72,11 +81,19 @@ test("inspectCliBins reports Cursor separately from Grok agent on PATH", async (
 });
 
 test("stage timeout is independent from the notify settle delay", () => {
-  withEnv("PIT_STAGE_TIMEOUT_MS", "300000", () => {
-    withEnv("PIT_NOTIFY_MCP_SETTLE_MS", "10000", () => {
+  withEnv("STAGE_TIMEOUT_MS", "300000", () => {
+    withEnv("NOTIFY_MCP_SETTLE_MS", "10000", () => {
       const exec = resolveExecution();
       assert.equal(exec.stageTimeoutMs, 300000);
       assert.equal(exec.timeoutMs, 120000);
+    });
+  });
+});
+
+test("resolveExecution still honors legacy PIT_ env names", () => {
+  withEnv("STAGE_TIMEOUT_MS", undefined, () => {
+    withEnv("PIT_STAGE_TIMEOUT_MS", "450000", () => {
+      assert.equal(resolveExecution().stageTimeoutMs, 450000);
     });
   });
 });

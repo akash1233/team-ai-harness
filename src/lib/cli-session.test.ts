@@ -198,18 +198,22 @@ test("bashSetTerminalTitle emits terminal title escape", () => {
   assert.match(bashSetTerminalTitle("Kindling — Notify"), /'Kindling — Notify'/);
 });
 
-test("notifyMcpSettleMs reads PIT_NOTIFY_MCP_SETTLE_MS", () => {
-  const prev = process.env.PIT_NOTIFY_MCP_SETTLE_MS;
+test("notifyMcpSettleMs reads NOTIFY_MCP_SETTLE_MS", () => {
+  const prev = process.env.NOTIFY_MCP_SETTLE_MS;
+  const prevPit = process.env.PIT_NOTIFY_MCP_SETTLE_MS;
   try {
+    delete process.env.NOTIFY_MCP_SETTLE_MS;
     delete process.env.PIT_NOTIFY_MCP_SETTLE_MS;
     assert.equal(notifyMcpSettleMs(), NOTIFY_MCP_SETTLE_MS);
-    process.env.PIT_NOTIFY_MCP_SETTLE_MS = "5000";
+    process.env.NOTIFY_MCP_SETTLE_MS = "5000";
     assert.equal(notifyMcpSettleMs(), 5000);
-    process.env.PIT_NOTIFY_MCP_SETTLE_MS = "nope";
+    process.env.NOTIFY_MCP_SETTLE_MS = "nope";
     assert.equal(notifyMcpSettleMs(), NOTIFY_MCP_SETTLE_MS);
   } finally {
-    if (prev === undefined) delete process.env.PIT_NOTIFY_MCP_SETTLE_MS;
-    else process.env.PIT_NOTIFY_MCP_SETTLE_MS = prev;
+    if (prev === undefined) delete process.env.NOTIFY_MCP_SETTLE_MS;
+    else process.env.NOTIFY_MCP_SETTLE_MS = prev;
+    if (prevPit === undefined) delete process.env.PIT_NOTIFY_MCP_SETTLE_MS;
+    else process.env.PIT_NOTIFY_MCP_SETTLE_MS = prevPit;
   }
 });
 

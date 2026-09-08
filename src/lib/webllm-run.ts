@@ -1,6 +1,6 @@
 import { fallbackFor } from "./agent-fallbacks.ts";
 import {
-  extractGrill,
+  extractFry,
   extractPlan,
   previewStagePrompt,
   type AgentInput,
@@ -8,10 +8,10 @@ import {
 } from "./discovery-agent.ts";
 import {
   FILE_JIRA_COLUMN_ID,
-  FRY_COLUMN_ID,
   SEND_SLACK_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
   columnById,
+  isFryStage,
 } from "./columns.ts";
 import { stripThinkBlocks } from "./cli-session.ts";
 import { getFlowStage } from "./flow-spec.ts";
@@ -36,7 +36,7 @@ export async function runWebllmStage(
   data: AgentInput & { onProgress?: (text: string) => void },
 ): Promise<AgentResult> {
   ensureLogFlush();
-  const { ticket, columnId, grillSubmit, execution, promptOverride, onProgress } = data;
+  const { ticket, columnId, frySubmit, execution, promptOverride, onProgress } = data;
   emitAppConsole(
     `[kindling] ${new Date().toISOString()} INFO  exec.stage webllm columnId=${columnId} ticket=${ticket.key}`,
   );
@@ -69,7 +69,7 @@ export async function runWebllmStage(
   const input = recordedInput(prompt.system, prompt.user);
   span.log.info("prompt.ready", { chars: input.length });
   const max = getFlowStage(columnId)?.maxTokens ?? 4000;
-  const json = columnId === FRY_COLUMN_ID || columnId === WRITE_PLAN_COLUMN_ID;
+  const json = isFryStage(columnId) || columnId === WRITE_PLAN_COLUMN_ID;
   span.log.debug("prompt", { chars: input.length, prompt: clip(input), maxTokens: max, json });
 
   const live = await runWebllmCompletion({
@@ -100,17 +100,17 @@ export async function runWebllmStage(
     return { ok: false, error: live.error || "WebLLM failed", via: live.via, input };
   }
 
-  const fb = fallbackFor(ticket, columnId, grillSubmit);
+  const fb = fallbackFor(ticket, columnId, frySubmit);
   const raw = live.ok && live.text.trim() ? live.text.trim() : fb.text;
   const text = stripThinkBlocks(raw);
   const usedVia = live.ok ? live.via : "demo";
   const plan = columnId === WRITE_PLAN_COLUMN_ID ? extractPlan(text) ?? fb.plan : undefined;
-  const grill = columnId === FRY_COLUMN_ID ? extractGrill(text) ?? fb.grill : undefined;
+  const fry = isFryStage(columnId) ? extractFry(text) ?? fb.fry : undefined;
   const summary =
-    columnId === FRY_COLUMN_ID
-      ? grill?.frontierEmpty
-        ? "Fryme complete"
-        : `Grill round (${grill?.questions.length ?? 0} questions)`
+    isFryStage(columnId)
+      ? fry?.frontierEmpty
+        ? "Fry Me complete"
+        : `Fry Me round (${fry?.questions.length ?? 0} questions)`
       : columnId === WRITE_PLAN_COLUMN_ID
         ? "Plan drafted"
         : columnId === "synthesize"
@@ -128,7 +128,7 @@ export async function runWebllmStage(
     spend: live.ok && !useDemo ? live.spend : 0,
     runId: id,
     plan,
-    grill,
+    fry,
     via: usedVia,
     usage: live.ok && !useDemo ? live.usage : undefined,
   };

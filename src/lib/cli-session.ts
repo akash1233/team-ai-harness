@@ -158,9 +158,9 @@ export const LONG_SESSION_HARD_CAP_MS = 45 * 60 * 1000;
 export const LONG_SESSION_IDLE_MS = 20_000;
 export const NOTIFY_MCP_SETTLE_MS = 15_000;
 
-/** Notify auto-harvest delay after MCP success keywords (ms). Override via PIT_NOTIFY_MCP_SETTLE_MS. */
+/** Notify auto-harvest delay after MCP success keywords (ms). Override via NOTIFY_MCP_SETTLE_MS. */
 export function notifyMcpSettleMs(): number {
-  const raw = process.env.PIT_NOTIFY_MCP_SETTLE_MS?.trim();
+  const raw = process.env.NOTIFY_MCP_SETTLE_MS?.trim() || process.env.PIT_NOTIFY_MCP_SETTLE_MS?.trim();
   if (!raw) return NOTIFY_MCP_SETTLE_MS;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : NOTIFY_MCP_SETTLE_MS;

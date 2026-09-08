@@ -33,7 +33,7 @@ const ticket: Ticket = {
   outputs: { ideation: "Slack channel: #dx" },
   vars: { brief: "Slack channel: #dx" },
   agentResponses: [],
-  grillRounds: [],
+    fryRounds: [],
   fryComplete: false,
   plan: null,
   jiraCreated: [],
@@ -85,7 +85,31 @@ test("harvestReviewVars writes approved key and updates the source variable", ()
 });
 
 test("mentionedKeys lists unique tokens", () => {
-  assert.deepEqual(mentionedKeys("{{spec}} then {{spec}} and {{grill}}"), ["spec", "grill"]);
+  assert.deepEqual(mentionedKeys("{{spec}} then {{spec}} and {{fryme}}"), ["spec", "fryme"]);
+});
+
+test("{{grill}} still interpolates after the Fry Me rename", () => {
+  const t = {
+    ...ticket,
+    vars: { fryme: "Settled Fry Me answers" },
+    fryRounds: [],
+  };
+  const ctx = buildContext(t);
+  assert.equal(ctx.fryme, "Settled Fry Me answers");
+  assert.equal(ctx.grill, "Settled Fry Me answers");
+  assert.equal(ctx.fyyme, "Settled Fry Me answers");
+  assert.equal(ctx.fry, "Settled Fry Me answers");
+  assert.equal(interpolate("Plan must honor:\n{{grill}}", ctx), "Plan must honor:\nSettled Fry Me answers");
+  assert.equal(interpolate("{{fyyme}}", ctx), "Settled Fry Me answers");
+  const fryCol = COLUMNS.find((c) => c.id === "fryme");
+  const harvested = harvestVars(t, fryCol, "New conclusions");
+  assert.equal(harvested.fryme, "New conclusions");
+  assert.equal(harvested.grill, "New conclusions");
+  assert.equal(harvested.fry, "New conclusions");
+  const legacyCol = { ...fryCol!, id: "fry", outputKey: "grill" };
+  const fromLegacy = harvestVars(t, legacyCol, "Legacy harvest");
+  assert.equal(fromLegacy.fryme, "Legacy harvest");
+  assert.equal(fromLegacy.grill, "Legacy harvest");
 });
 
 test("outputVarName prefers outputKey", () => {

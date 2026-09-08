@@ -1,6 +1,6 @@
-import type { GrillQuestion, Plan, Ticket } from "./types";
+import type { FryQuestion, Plan, Ticket } from "./types";
 import {
-  FRY_COLUMN_ID,
+  isFryStage,
   PLAN_JSON_END,
   PLAN_JSON_START,
   PREP_AGENDA_COLUMN_ID,
@@ -11,14 +11,14 @@ import {
 export type Fallback = {
   text: string;
   plan?: Plan;
-  grill?: { frontierEmpty: boolean; questions: GrillQuestion[] };
+  fry?: { frontierEmpty: boolean; questions: FryQuestion[] };
 };
 
-function q(n: number, question: string, recommended: string): GrillQuestion {
+function q(n: number, question: string, recommended: string): FryQuestion {
   return { n, question, recommended, answer: "", source: "spec" };
 }
 
-export function fallbackFor(ticket: Ticket, columnId: string, grillSubmit?: boolean): Fallback {
+export function fallbackFor(ticket: Ticket, columnId: string, frySubmit?: boolean): Fallback {
   if (columnId === PREP_AGENDA_COLUMN_ID) {
     const text = `## Team Discussion Agenda — ${ticket.key} ${ticket.title}
 
@@ -56,7 +56,7 @@ Carry a versioned prompt (and optional override) on the ticket so every Discover
 ## User Stories
 1. As an operator, I want the prompt on the ticket, so I can audit the run.
 2. As an admin, I want to publish versions without a deploy.
-3. As Fryme, I want a pinned sha, so mid-run edits cannot change questions.
+3. As Fry Me, I want a pinned sha, so mid-run edits cannot change questions.
 4. As security, I want Jira description fenced, so it cannot become system prompt.
 
 ## Implementation Decisions
@@ -72,18 +72,18 @@ Carry a versioned prompt (and optional override) on the ticket so every Discover
 Sana auto-ingest, Conduit, Main XO execute, inventing extra Jira issues.
 
 ## Further Notes
-Decisions already on the ticket should not be re-derived in Fryme.`;
+Decisions already on the ticket should not be re-derived in Fry Me.`;
     return { text };
   }
 
-  if (columnId === FRY_COLUMN_ID) {
-    const answered = ticket.grillRounds.filter((r) => r.submitted).length;
-    if (grillSubmit && answered >= 1) {
-      const conclusions = `## Fryme conclusions — ${ticket.key}
+  if (isFryStage(columnId)) {
+    const answered = ticket.fryRounds.filter((r) => r.submitted).length;
+    if (frySubmit && answered >= 1) {
+      const conclusions = `## Fry Me conclusions — ${ticket.key}
 
 Decisions
 - Prompt registry keyed by workflow + column. Tickets pin a sha at start.
-- Precedence: override > pin > default. Missing pin → PIT_BLOCKED, no repo-skill fallback.
+- Precedence: override > pin > default. Missing pin → BLOCKED, no repo-skill fallback.
 - Runs are read-only on the pinned text. Admins publish; operators may fork.
 - Jira description is a fenced user block, never concatenated into the system prompt.
 
@@ -94,7 +94,7 @@ Remaining risks
 Do not re-derive storage vs Jira custom field. Registry + pin is settled.`;
       return {
         text: "```json\n" + JSON.stringify({ frontierEmpty: true, questions: [], conclusions }) + "\n```\n\n" + conclusions,
-        grill: { frontierEmpty: true, questions: [] },
+        fry: { frontierEmpty: true, questions: [] },
       };
     }
 
@@ -112,7 +112,7 @@ Do not re-derive storage vs Jira custom field. Registry + pin is settled.`;
       q(
         3,
         "What happens if the pin is missing — repo skill fallback or fail closed?",
-        "Fail closed with [PIT_BLOCKED: no pinned prompt]. Silent fallback is how the current bug survived.",
+        "Fail closed with [BLOCKED: no pinned prompt]. Silent fallback is how the current bug survived.",
       ),
       q(
         4,
@@ -122,13 +122,13 @@ Do not re-derive storage vs Jira custom field. Registry + pin is settled.`;
     ];
     return {
       text: "```json\n" + JSON.stringify({ frontierEmpty: false, questions }, null, 2) + "\n```",
-      grill: { frontierEmpty: false, questions },
+      fry: { frontierEmpty: false, questions },
     };
   }
 
   if (columnId === WRITE_PLAN_COLUMN_ID) {
     const plan: Plan = {
-      summary: `${ticket.key} ${ticket.title}. Carry versioned Discovery prompts on the ticket so grill/plan agents read a pinned contract instead of repo skills.`,
+      summary: `${ticket.key} ${ticket.title}. Carry versioned Discovery prompts on the ticket so Fry Me/plan agents read a pinned contract instead of repo skills.`,
       findings: [
         "Operators cannot audit the live prompt.",
         "Silent repo-skill fallback hid the bug.",
@@ -167,7 +167,7 @@ Do not re-derive storage vs Jira custom field. Registry + pin is settled.`;
         },
         {
           title: "Story: Fail closed on missing pin",
-          detail: "If a run has no pin, print [PIT_BLOCKED: no pinned prompt] and stop. No repo-skill fallback.",
+          detail: "If a run has no pin, print [BLOCKED: no pinned prompt] and stop. No repo-skill fallback.",
           references: ["Epic: Prompt registry for Discovery columns"],
         },
       ],

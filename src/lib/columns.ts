@@ -9,8 +9,31 @@ export const SEND_SLACK_COLUMN_ID = "send-slack";
 export const TRANSCRIPT_COLUMN_ID = "transcript";
 export const SYNTHESIZE_COLUMN_ID = "synthesize";
 export const PREVIEW_SYNTHESIZE_COLUMN_ID = "preview-synthesize";
-export const FRY_COLUMN_ID = "fry";
-export const PREVIEW_FRY_COLUMN_ID = "preview-fry";
+export const FRY_COLUMN_ID = "fryme";
+export const PREVIEW_FRY_COLUMN_ID = "preview-fryme";
+export const FRY_DOC_ID = "doc-fry-me";
+export const LEGACY_FRY_COLUMN_ID = "fry";
+export const LEGACY_PREVIEW_FRY_COLUMN_ID = "preview-fry";
+export const LEGACY_FRY_DOC_ID = "doc-grill-me";
+
+/** Map pre-rename Discovery ids so saved tickets still land on the Fry Me stages. */
+export function migrateColumnId(id: string): string {
+  if (id === LEGACY_FRY_COLUMN_ID) return FRY_COLUMN_ID;
+  if (id === LEGACY_PREVIEW_FRY_COLUMN_ID) return PREVIEW_FRY_COLUMN_ID;
+  return id;
+}
+
+export function isFryStage(id: string): boolean {
+  return migrateColumnId(id) === FRY_COLUMN_ID;
+}
+
+/** Current id plus the pre-rename id, so clears and lookups hit both. */
+export function columnIdAliases(id: string): string[] {
+  const current = migrateColumnId(id);
+  if (current === FRY_COLUMN_ID) return [FRY_COLUMN_ID, LEGACY_FRY_COLUMN_ID];
+  if (current === PREVIEW_FRY_COLUMN_ID) return [PREVIEW_FRY_COLUMN_ID, LEGACY_PREVIEW_FRY_COLUMN_ID];
+  return current === id ? [id] : [id, current];
+}
 export const WRITE_PLAN_COLUMN_ID = "write-plan";
 export const APPROVE_COLUMN_ID = "approve";
 export const FILE_JIRA_COLUMN_ID = "file-jira";
@@ -89,7 +112,10 @@ export function columnById(
   id: string,
   columns: WorkflowColumn[] = COLUMNS,
 ): WorkflowColumn | undefined {
-  return columns.find((c) => c.id === id);
+  const wanted = migrateColumnId(id);
+  const col = columns.find((c) => migrateColumnId(c.id) === wanted);
+  if (!col) return undefined;
+  return col.id === wanted ? col : { ...col, id: wanted };
 }
 
 /** First enabled collect-input, else the first enabled stage — tickets always have a home. */
@@ -104,25 +130,31 @@ export function startColumnId(columns: WorkflowColumn[]): string {
 }
 
 export function resolveActiveStage(columns: WorkflowColumn[], current?: string): string {
-  if (current && columns.some((c) => c.id === current)) return current;
+  if (current) {
+    const wanted = migrateColumnId(current);
+    if (columns.some((c) => migrateColumnId(c.id) === wanted)) return wanted;
+  }
   return startColumnId(columns);
 }
 
 export function parkOrphanTickets<T extends { columnId: string }>(tickets: T[], columns: WorkflowColumn[]): T[] {
-  const ids = new Set(columns.map((c) => c.id));
+  const ids = new Set(columns.map((c) => migrateColumnId(c.id)));
   const start = startColumnId(columns);
-  return tickets.map((t) => (ids.has(t.columnId) ? t : { ...t, columnId: start }));
+  return tickets.map((t) => {
+    const columnId = migrateColumnId(t.columnId);
+    return ids.has(columnId) ? { ...t, columnId } : { ...t, columnId: start };
+  });
 }
 
 export function nextColumnId(
   columnId: string,
   columns: WorkflowColumn[] = COLUMNS,
 ): string | null {
-  const i = columns.findIndex((c) => c.id === columnId);
+  const i = columns.findIndex((c) => migrateColumnId(c.id) === migrateColumnId(columnId));
   if (i < 0) return null;
   for (let j = i + 1; j < columns.length; j++) {
     const col = columns[j];
-    if (col?.enabled) return col.id;
+    if (col?.enabled) return migrateColumnId(col.id);
   }
   return null;
 }
@@ -132,11 +164,13 @@ export function previousColumn(
   columnId: string,
   columns: WorkflowColumn[] = COLUMNS,
 ): WorkflowColumn | undefined {
-  const i = columns.findIndex((c) => c.id === columnId);
+  const i = columns.findIndex((c) => migrateColumnId(c.id) === migrateColumnId(columnId));
   if (i < 0) return undefined;
   for (let j = i - 1; j >= 0; j--) {
     const col = columns[j];
-    if (col?.enabled) return col;
+    if (!col?.enabled) continue;
+    const id = migrateColumnId(col.id);
+    return col.id === id ? col : { ...col, id };
   }
   return undefined;
 }
@@ -149,7 +183,7 @@ export const QUICK_SPEC_FLOW_ID = "flow-quick-spec";
 export function cloneColumns(ids?: string[]): WorkflowColumn[] {
   if (!ids) return COLUMNS.map((c) => ({ ...c }));
   return ids
-    .map((id) => COLUMNS.find((c) => c.id === id))
+    .map((id) => columnById(id, COLUMNS))
     .filter((c): c is WorkflowColumn => Boolean(c))
     .map((c) => ({ ...c }));
 }

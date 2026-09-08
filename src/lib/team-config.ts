@@ -10,12 +10,14 @@ import {
   QUICK_SPEC_FLOW_ID,
   SYNTHESIZE_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
+  migrateColumnId,
 } from "./columns.ts";
 import { mergePricing } from "./pricing.ts";
 import { createDefaultPrompts, stampPromptRefs } from "./prompts.ts";
 import { createDefaultConnectors, mergeConnectors } from "./connectors.ts";
 import { legacyDefaultAgent } from "./agents.ts";
 import { DEFAULT_DOCS } from "./grill-skill.ts";
+import { migrateDocId, migratePromptId, migrateSavedColumn } from "./fry-migrate.ts";
 import { isWebllmProfile, normalizeWebllmModelIds } from "./webllm.ts";
 import type { ExecutionConfig, Flow, TeamConfig, TeamDoc, TeamMember, WorkflowColumn } from "./types.ts";
 
@@ -36,7 +38,7 @@ export function createDiscoveryFlow(): Flow {
   return {
     id: DISCOVERY_FLOW_ID,
     name: "Discovery",
-    description: "Brief → agenda (Cursor print) → notes → spec (Cursor print) → Grill Me → backlog (Cursor) → Jira.",
+    description: "Brief → agenda (Cursor print) → notes → spec (Cursor print) → Fry Me → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns()),
     autoAdvance: true,
     autoRun: false,
@@ -48,7 +50,7 @@ export function createQuickSpecFlow(): Flow {
   return {
     id: QUICK_SPEC_FLOW_ID,
     name: "Quick spec",
-    description: "Skip agenda and Slack. Brief → spec (Cursor print) → grill → backlog (Cursor) → Jira.",
+    description: "Skip agenda and Slack. Brief → spec (Cursor print) → Fry Me → backlog (Cursor) → Jira.",
     columns: stampPromptRefs(cloneColumns([
       IDEATION_COLUMN_ID,
       SYNTHESIZE_COLUMN_ID,
@@ -137,10 +139,11 @@ export function mergeColumns(_saved?: WorkflowColumn[]): WorkflowColumn[] {
 export function mergeDocs(saved?: TeamDoc[]): TeamDoc[] {
   const defaults = DEFAULT_DOCS.map((d) => ({ ...d }));
   if (!saved?.length) return defaults;
-  const byId = new Map(saved.map((d) => [d.id, d]));
+  const byId = new Map(saved.map((d) => [migrateDocId(d.id), { ...d, id: migrateDocId(d.id) }]));
   const merged = defaults.map((d) => byId.get(d.id) ?? d);
   for (const d of saved) {
-    if (!merged.some((m) => m.id === d.id)) merged.push(d);
+    const id = migrateDocId(d.id);
+    if (!merged.some((m) => m.id === id)) merged.push({ ...d, id });
   }
   return merged;
 }
@@ -194,7 +197,7 @@ export function patchActiveFlow(config: TeamConfig, patch: Partial<Flow>): TeamC
 function fillMissingCli(columns: WorkflowColumn[]): WorkflowColumn[] {
   const defaults = createDefaultColumns();
   return columns.map((c) => {
-    const fromJson = defaults.find((d) => d.id === c.id);
+    const fromJson = defaults.find((d) => migrateColumnId(d.id) === migrateColumnId(c.id));
     let next = c;
     if (c.agent === "webllm" && fromJson?.agent && fromJson.agent !== "webllm") {
       next = { ...next, agent: fromJson.agent, webllmProfile: fromJson.webllmProfile };
@@ -212,19 +215,27 @@ export function restoreSessionPipeline(saved: Partial<TeamConfig>): TeamConfig {
   const flows = saved.flows?.length
     ? saved.flows.map((f) => ({
         ...f,
-        columns: fillMissingCli(f.columns?.length ? f.columns.map((c) => ({ ...c })) : boot.columns.map((c) => ({ ...c }))),
+        columns: fillMissingCli(
+          f.columns?.length ? f.columns.map((c) => migrateSavedColumn({ ...c })) : boot.columns.map((c) => ({ ...c })),
+        ),
       }))
     : boot.flows.map((f) =>
         f.id === (saved.activeFlowId ?? boot.activeFlowId) && saved.columns?.length
-          ? { ...f, columns: fillMissingCli(saved.columns.map((c) => ({ ...c }))) }
-          : { ...f, columns: fillMissingCli(f.columns.map((c) => ({ ...c }))) },
+          ? { ...f, columns: fillMissingCli(saved.columns.map((c) => migrateSavedColumn({ ...c }))) }
+          : { ...f, columns: fillMissingCli(f.columns.map((c) => migrateSavedColumn({ ...c }))) },
       );
   const activeFlowId =
     saved.activeFlowId && flows.some((f) => f.id === saved.activeFlowId) ? saved.activeFlowId : flows[0]!.id;
   const columns = (flows.find((f) => f.id === activeFlowId)?.columns ?? saved.columns ?? boot.columns).map((c) => ({
     ...c,
   }));
-  const prompts = saved.prompts?.length ? saved.prompts.map((p) => ({ ...p })) : createDefaultPrompts(columns);
+  const prompts = saved.prompts?.length
+    ? saved.prompts.map((p) => ({
+        ...p,
+        id: migratePromptId(p.id),
+        skillIds: (p.skillIds ?? []).map(migrateDocId),
+      }))
+    : createDefaultPrompts(columns);
   return applyActiveFlow({ ...boot, flows, columns, prompts, activeFlowId }, activeFlowId);
 }
 

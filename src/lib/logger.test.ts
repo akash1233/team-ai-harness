@@ -23,18 +23,22 @@ test("parseLogLevel accepts silent through debug", () => {
   assert.equal(parseLogLevel(""), null);
 });
 
-test("getLogLevel reads PIT_LOG_LEVEL from the environment", () => {
+test("getLogLevel reads LOG_LEVEL from the environment", () => {
   setLogLevel(null);
-  const prev = process.env.PIT_LOG_LEVEL;
-  process.env.PIT_LOG_LEVEL = "debug";
+  const prev = process.env.LOG_LEVEL;
+  const prevPit = process.env.PIT_LOG_LEVEL;
+  delete process.env.PIT_LOG_LEVEL;
+  process.env.LOG_LEVEL = "debug";
   assert.equal(getLogLevel(), "debug");
-  process.env.PIT_LOG_LEVEL = "silent";
+  process.env.LOG_LEVEL = "silent";
   assert.equal(getLogLevel(), "silent");
-  if (prev === undefined) delete process.env.PIT_LOG_LEVEL;
-  else process.env.PIT_LOG_LEVEL = prev;
+  if (prev === undefined) delete process.env.LOG_LEVEL;
+  else process.env.LOG_LEVEL = prev;
+  if (prevPit === undefined) delete process.env.PIT_LOG_LEVEL;
+  else process.env.PIT_LOG_LEVEL = prevPit;
 });
 
-test("PIT_LOG_LEVEL gates debug vs info vs error", () => {
+test("LOG_LEVEL gates debug vs info vs error", () => {
   setLogLevel("info");
   assert.equal(getLogLevel(), "info");
   assert.equal(isLevelEnabled("info"), true);

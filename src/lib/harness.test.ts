@@ -5,6 +5,7 @@ import {
   COLUMNS,
   DONE_COLUMN_ID,
   FILE_JIRA_COLUMN_ID,
+  columnById,
   nextColumnId,
   parkOrphanTickets,
   previousColumn,
@@ -71,7 +72,7 @@ function ticket(over: Partial<Ticket> = {}): Ticket {
     outputs: {},
     vars: {},
     agentResponses: [],
-    grillRounds: [],
+    fryRounds: [],
     fryComplete: false,
     plan: null,
     jiraCreated: [],
@@ -122,8 +123,23 @@ test("Discovery still advances File Jira to Done", () => {
 
 test("previousColumn for review gates is the prior enabled stage", () => {
   assert.equal(previousColumn("preview-agenda", COLUMNS)?.id, "prep-agenda");
-  assert.equal(previousColumn("preview-fry", COLUMNS)?.id, "fry");
+  assert.equal(previousColumn("preview-fryme", COLUMNS)?.id, "fryme");
+  assert.equal(previousColumn("preview-fry", COLUMNS)?.id, "fryme");
   assert.equal(previousColumn("approve", COLUMNS)?.id, "write-plan");
+});
+
+test("legacy fry stage ids still resolve after the Fry Me rename", () => {
+  assert.equal(columnById("fry", COLUMNS)?.id, "fryme");
+  assert.equal(columnById("preview-fry", COLUMNS)?.id, "preview-fryme");
+  assert.equal(resolveActiveStage(COLUMNS, "fry"), "fryme");
+  assert.equal(nextColumnId("fry", COLUMNS), "preview-fryme");
+  const parked = parkOrphanTickets([{ columnId: "fry" }], COLUMNS);
+  assert.equal(parked[0]?.columnId, "fryme");
+  const unmigrated = COLUMNS.map((c) => (c.id === "fryme" ? { ...c, id: "fry" } : c));
+  assert.equal(columnById("fryme", unmigrated)?.id, "fryme");
+  assert.equal(nextColumnId("fry", unmigrated), "preview-fryme");
+  assert.equal(resolveActiveStage(unmigrated, "fryme"), "fryme");
+  assert.equal(parkOrphanTickets([{ columnId: "fryme" }], unmigrated)[0]?.columnId, "fryme");
 });
 
 test("orphaned tickets land on stage 01 of the current flow", () => {
@@ -164,10 +180,10 @@ test("library prompt + skill is what the stage actually runs", () => {
   const stage = col({ id: "grill", role: "prompt", promptRef: "p1" });
   const resolved = resolveStagePrompt(
     stage,
-    [{ id: "p1", name: "Grill", body: "Grill the spec.", skillIds: ["doc-grill-me"], jiraKeys: [] }],
-    [{ id: "doc-grill-me", title: "grill-me", kind: "skill", body: "Interview relentlessly." }],
+    [{ id: "p1", name: "Fry Me", body: "Fry the spec.", skillIds: ["doc-fry-me"], jiraKeys: [] }],
+    [{ id: "doc-fry-me", title: "fry-me", kind: "skill", body: "Interview relentlessly." }],
   );
-  assert.match(resolved.body, /Grill the spec/);
+  assert.match(resolved.body, /Fry the spec/);
   assert.match(resolved.body, /Interview relentlessly/);
 });
 

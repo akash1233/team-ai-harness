@@ -38,70 +38,73 @@ export type ModelCall = {
   pending?: boolean;
 };
 
+/** Prefer Kindling names; still honor legacy PIT_* so existing .env files keep working. */
 function envStr(key: string): string | undefined {
   const v = process.env[key];
-  return v && v.trim() ? v.trim() : undefined;
+  if (v && v.trim()) return v.trim();
+  const legacy = process.env[`PIT_${key}`];
+  return legacy && legacy.trim() ? legacy.trim() : undefined;
 }
 
 export function resolveExecution(client?: ExecutionConfig): ExecutionConfig {
   const base = { ...createDefaultExecution(), ...client };
   const fromLegacy = legacyDefaultAgent(client);
-  const envKind = envStr("PIT_PROVIDER") ?? envStr("PIT_DEFAULT_AGENT");
+  const envKind = envStr("DEFAULT_AGENT") ?? envStr("PROVIDER");
   const defaultAgent: AgentKind = isAgentKind(envKind)
     ? envKind
     : (client?.defaultAgent ?? fromLegacy ?? base.defaultAgent);
-  const envProfile = envStr("PIT_WEBLLM_PROFILE");
+  const envProfile = envStr("WEBLLM_PROFILE");
   const webllmProfile = isWebllmProfile(envProfile) ? envProfile : base.webllmProfile ?? "balanced";
-  const webllmModelId = envStr("PIT_WEBLLM_MODEL") || base.webllmModelId || "";
-  const cursorTarget = envStr("PIT_CURSOR_TARGET") === "remote" ? "remote" : envStr("PIT_CURSOR_TARGET") === "local" ? "local" : base.cursorTarget;
-  const claudeTarget = envStr("PIT_CLAUDE_TARGET") === "remote" ? "remote" : envStr("PIT_CLAUDE_TARGET") === "local" ? "local" : base.claudeTarget;
+  const webllmModelId = envStr("WEBLLM_MODEL") || base.webllmModelId || "";
+  const cursorTarget = envStr("CURSOR_TARGET") === "remote" ? "remote" : envStr("CURSOR_TARGET") === "local" ? "local" : base.cursorTarget;
+  const claudeTarget = envStr("CLAUDE_TARGET") === "remote" ? "remote" : envStr("CLAUDE_TARGET") === "local" ? "local" : base.claudeTarget;
   const seeded = mergePricing(base.pricing);
   return {
     ...base,
     defaultAgent,
     cursorTarget,
     claudeTarget,
-    cursorCommand: envStr("PIT_CURSOR_COMMAND") || base.cursorCommand,
-    claudeCommand: envStr("PIT_CLAUDE_COMMAND") || base.claudeCommand,
-    localHttpUrl: envStr("PIT_LOCAL_HTTP_URL") || base.localHttpUrl,
-    cursorRemoteUrl: envStr("PIT_CURSOR_REMOTE_URL") || base.cursorRemoteUrl,
-    claudeRemoteUrl: envStr("PIT_CLAUDE_REMOTE_URL") || base.claudeRemoteUrl,
-    studioBaseUrl: (envStr("PIT_STUDIO_BASE_URL") || base.studioBaseUrl).replace(/\/$/, ""),
-    featureKey: envStr("PIT_FEATURE_KEY") || base.featureKey,
-    promptId: envStr("PIT_PROMPT_ID") || base.promptId,
-    cisProvider: envStr("PIT_CIS_PROVIDER") || base.cisProvider,
-    cisModel: envStr("PIT_CIS_MODEL") || base.cisModel,
-    cisTaskType: envStr("PIT_CIS_TASK_TYPE") || base.cisTaskType,
-    timeoutMs: Number(envStr("PIT_TIMEOUT_MS") || base.timeoutMs) || 120000,
-    stageTimeoutMs: Number(envStr("PIT_STAGE_TIMEOUT_MS") || base.stageTimeoutMs) || 300000,
-    demoFallbacks: envStr("PIT_DEMO_FALLBACKS") === "0" ? false : envStr("PIT_DEMO_FALLBACKS") === "1" ? true : base.demoFallbacks,
+    cursorCommand: envStr("CURSOR_COMMAND") || base.cursorCommand,
+    claudeCommand: envStr("CLAUDE_COMMAND") || base.claudeCommand,
+    localHttpUrl: envStr("LOCAL_HTTP_URL") || base.localHttpUrl,
+    cursorRemoteUrl: envStr("CURSOR_REMOTE_URL") || base.cursorRemoteUrl,
+    claudeRemoteUrl: envStr("CLAUDE_REMOTE_URL") || base.claudeRemoteUrl,
+    studioBaseUrl: (envStr("STUDIO_BASE_URL") || base.studioBaseUrl).replace(/\/$/, ""),
+    featureKey: envStr("FEATURE_KEY") || base.featureKey,
+    promptId: envStr("PROMPT_ID") || base.promptId,
+    cisProvider: envStr("CIS_PROVIDER") || base.cisProvider,
+    cisModel: envStr("CIS_MODEL") || base.cisModel,
+    cisTaskType: envStr("CIS_TASK_TYPE") || base.cisTaskType,
+    timeoutMs: Number(envStr("TIMEOUT_MS") || base.timeoutMs) || 120000,
+    stageTimeoutMs: Number(envStr("STAGE_TIMEOUT_MS") || base.stageTimeoutMs) || 300000,
+    demoFallbacks: envStr("DEMO_FALLBACKS") === "0" ? false : envStr("DEMO_FALLBACKS") === "1" ? true : base.demoFallbacks,
     pricing: mergePricing({
       ...seeded,
-      charsPerToken: Number(envStr("PIT_CHARS_PER_TOKEN") || seeded.charsPerToken) || seeded.charsPerToken,
+      charsPerToken: Number(envStr("CHARS_PER_TOKEN") || seeded.charsPerToken) || seeded.charsPerToken,
       claude: {
-        inputUsdPerMTok: Number(envStr("PIT_CLAUDE_IN_USD_PER_MTOK") || seeded.claude.inputUsdPerMTok),
-        outputUsdPerMTok: Number(envStr("PIT_CLAUDE_OUT_USD_PER_MTOK") || seeded.claude.outputUsdPerMTok),
+        inputUsdPerMTok: Number(envStr("CLAUDE_IN_USD_PER_MTOK") || seeded.claude.inputUsdPerMTok),
+        outputUsdPerMTok: Number(envStr("CLAUDE_OUT_USD_PER_MTOK") || seeded.claude.outputUsdPerMTok),
       },
       cursor: {
-        inputUsdPerMTok: Number(envStr("PIT_CURSOR_IN_USD_PER_MTOK") || seeded.cursor.inputUsdPerMTok),
-        outputUsdPerMTok: Number(envStr("PIT_CURSOR_OUT_USD_PER_MTOK") || seeded.cursor.outputUsdPerMTok),
+        inputUsdPerMTok: Number(envStr("CURSOR_IN_USD_PER_MTOK") || seeded.cursor.inputUsdPerMTok),
+        outputUsdPerMTok: Number(envStr("CURSOR_OUT_USD_PER_MTOK") || seeded.cursor.outputUsdPerMTok),
       },
       studio: {
-        inputUsdPerMTok: Number(envStr("PIT_STUDIO_IN_USD_PER_MTOK") || seeded.studio.inputUsdPerMTok),
-        outputUsdPerMTok: Number(envStr("PIT_STUDIO_OUT_USD_PER_MTOK") || seeded.studio.outputUsdPerMTok),
+        inputUsdPerMTok: Number(envStr("STUDIO_IN_USD_PER_MTOK") || seeded.studio.inputUsdPerMTok),
+        outputUsdPerMTok: Number(envStr("STUDIO_OUT_USD_PER_MTOK") || seeded.studio.outputUsdPerMTok),
       },
       cis: {
-        inputUsdPerMTok: Number(envStr("PIT_CIS_IN_USD_PER_MTOK") || seeded.cis.inputUsdPerMTok),
-        outputUsdPerMTok: Number(envStr("PIT_CIS_OUT_USD_PER_MTOK") || seeded.cis.outputUsdPerMTok),
+        inputUsdPerMTok: Number(envStr("CIS_IN_USD_PER_MTOK") || seeded.cis.inputUsdPerMTok),
+        outputUsdPerMTok: Number(envStr("CIS_OUT_USD_PER_MTOK") || seeded.cis.outputUsdPerMTok),
       },
     }),
     provider: defaultAgent === "studio" || defaultAgent === "cis" ? defaultAgent : "local",
     localAgent: defaultAgent === "claude" ? "claude" : "cursor",
-    workspaceDir: envStr("PIT_WORKSPACE") || base.workspaceDir || "",
-    cursorExtraArgs: envStr("PIT_CURSOR_EXTRA_ARGS") || base.cursorExtraArgs || "--trust -f",
-    claudeExtraArgs: envStr("PIT_CLAUDE_EXTRA_ARGS") || base.claudeExtraArgs || "",
-    runInTerminal: envStr("PIT_RUN_IN_TERMINAL") === "0" ? false : envStr("PIT_RUN_IN_TERMINAL") === "1" ? true : base.runInTerminal !== false,
-    fullAgentMode: envStr("PIT_FULL_AGENT") === "1" ? true : envStr("PIT_FULL_AGENT") === "0" ? false : Boolean(base.fullAgentMode),
+    workspaceDir: envStr("WORKSPACE") || base.workspaceDir || "",
+    cursorExtraArgs: envStr("CURSOR_EXTRA_ARGS") || base.cursorExtraArgs || "--trust -f",
+    claudeExtraArgs: envStr("CLAUDE_EXTRA_ARGS") || base.claudeExtraArgs || "",
+    runInTerminal: envStr("RUN_IN_TERMINAL") === "0" ? false : envStr("RUN_IN_TERMINAL") === "1" ? true : base.runInTerminal !== false,
+    fullAgentMode: envStr("FULL_AGENT") === "1" ? true : envStr("FULL_AGENT") === "0" ? false : Boolean(base.fullAgentMode),
     webllmProfile,
     webllmModelId,
   };

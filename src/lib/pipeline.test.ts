@@ -53,7 +53,10 @@ test("Discovery agents: agenda Cursor print, spec Cursor print, plan Cursor", ()
   assert.equal(plan?.cli, "print");
   assert.equal(notify?.agent, "cursor");
   assert.equal(notify?.cli, "tui");
+  assert.equal(fileJira?.agent, "cursor");
   assert.equal(fileJira?.cli, "tui");
+  assert.match(fileJira?.promptTemplate ?? "", /createNewJiraTicket/);
+  assert.match(fileJira?.promptTemplate ?? "", /jira-ghe/);
   assert.equal(fry?.agent, "claude");
   assert.equal(fry?.cli, "print");
 });

@@ -59,7 +59,11 @@ export function StageRail() {
             <span className="min-w-0 flex-1 whitespace-nowrap text-sm font-medium leading-snug md:whitespace-normal md:break-words">
               {col.label}
             </span>
-            {badge ? (
+            {col.testMode ? (
+              <span className={cn("hidden shrink-0 font-mono text-micro md:inline", active ? (failed ? "text-danger-fg/80" : "text-accent-fg/80") : "text-subtle")}>
+                test
+              </span>
+            ) : badge ? (
               <span className={cn("hidden shrink-0 font-mono text-micro md:inline", active ? (failed ? "text-danger-fg/80" : "text-accent-fg/80") : "text-subtle")}>
                 {badge}
               </span>

@@ -158,6 +158,33 @@ test("evaluateLongSessionPoll does not idle-complete notify without MCP keywords
   assert.equal(verdict.done, false);
 });
 
+test("evaluateLongSessionPoll does not idle-complete File Jira without created keys", () => {
+  const now = Date.now();
+  const snap = {
+    log: "[kindling] interactive stage\nFile this signed-off plan using createNewJiraTicket\nX2-698",
+    exitCode: null,
+    startedAt: now - 30_000,
+    mtimeMs: now - 20_000,
+  };
+  const verdict = evaluateLongSessionPoll(snap, { columnId: "file-jira" });
+  assert.equal(verdict.done, false);
+});
+
+test("evaluateLongSessionPoll completes File Jira after browse-link success", () => {
+  const snap = {
+    log: "Created [X2-910](https://jira2.workday.com/browse/X2-910)",
+    exitCode: null,
+    startedAt: Date.now() - 5000,
+    mtimeMs: Date.now() - 1000,
+  };
+  const verdict = evaluateLongSessionPoll(snap, {
+    columnId: "file-jira",
+    notifyMcpSeenAt: Date.now() - NOTIFY_MCP_SETTLE_MS - 1_000,
+  });
+  assert.equal(verdict.done, true);
+  assert.equal(verdict.ok, true);
+});
+
 test("evaluateLongSessionPoll idle-completes non-notify long sessions", () => {
   const now = Date.now();
   const filler = "x".repeat(180);

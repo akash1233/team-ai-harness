@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BLOCKED_COLUMN_ID, COLUMNS, columnsFromFlowSpec } from "./columns.ts";
+import { BLOCKED_COLUMN_ID, COLUMNS, QUICK_SPEC_COLUMNS, columnsFromFlowSpec } from "./columns.ts";
 import {
   clearFlowSpecCache,
   discoveryFlowPath,
@@ -10,6 +10,7 @@ import {
   getFlowStage,
   listFlowVariables,
   loadDiscoveryFlowSpec,
+  loadQuickSpecFlowSpec,
   resolveFlowStagePrompt,
   validateStagePrompt,
 } from "./flow-spec.ts";
@@ -45,6 +46,37 @@ const baseTicket: Ticket = {
   linkedJiras: [],
 };
 
+test("Quick spec JSON is transcript through Done and is the default flow", async () => {
+  const flow = loadQuickSpecFlowSpec();
+  assert.equal(flow.id, "flow-quick-spec");
+  assert.deepEqual(
+    flow.stages.map((s) => s.id),
+    [
+      "transcript",
+      "synthesize",
+      "preview-synthesize",
+      "fryme",
+      "preview-fryme",
+      "write-plan",
+      "approve",
+      "file-jira",
+      "done",
+    ],
+  );
+  assert.deepEqual(
+    QUICK_SPEC_COLUMNS.map((c) => c.id),
+    flow.stages.map((s) => s.id),
+  );
+  for (const stage of flow.stages) {
+    assert.deepEqual(validateStagePrompt(stage, flow), [], `unknown tokens in ${stage.id}`);
+  }
+  const { createDefaultTeam } = await import("./team-config.ts");
+  const team = createDefaultTeam();
+  assert.equal(team.activeFlowId, "flow-quick-spec");
+  assert.equal(team.columns[0]?.id, "transcript");
+  assert.equal(team.columns.some((c) => c.id === "prep-agenda"), false);
+});
+
 test("discovery flow JSON loads from flows/discovery.flow.json", () => {
   clearFlowSpecCache();
   const flow = loadDiscoveryFlowSpec();
@@ -60,6 +92,8 @@ test("listFlowVariables documents the system catalog", () => {
   assert.ok(vars.slackMessage);
   assert.ok(vars["approved-agenda"]);
   assert.ok(vars.fryme);
+  assert.ok(vars["fryme.qa"]);
+  assert.ok(vars["fryme.conclusions"]);
 });
 
 test("review stages write the approved previous output and have no agent prompt", () => {
@@ -91,6 +125,25 @@ test("Agenda prompt contains brief and all linked Jiras only", () => {
   assert.match(prompt!.user, /X2-456 Second epic[\s\S]*Second body/);
   assert.doesNotMatch(prompt!.user, /Should not appear in agenda/);
   assert.doesNotMatch(prompt!.user, /Upstream outputs/);
+});
+
+test("File Jira prompt sends the signed-off plan to jira-ghe on Cursor", () => {
+  const prompt = resolveFlowStagePrompt("file-jira", {
+    ...baseTicket,
+    plan: {
+      summary: "Pin prompts.",
+      findings: [],
+      scope: [],
+      outOfScope: [],
+      risks: [],
+      steps: [{ title: "Epic: Prompt registry", detail: "Store versions.", references: [] }],
+    },
+  });
+  assert.ok(prompt);
+  assert.match(prompt!.system, /jira-ghe createNewJiraTicket/);
+  assert.match(prompt!.user, /projectKey: X2/);
+  assert.match(prompt!.user, /Epic: Prompt registry/);
+  assert.match(prompt!.user, /createNewJiraTicket/);
 });
 
 test("Notify prompt contains slack channel and composed message with agenda", () => {
@@ -131,13 +184,25 @@ test("Discovery flow pins Agenda and Spec to Cursor print; Notify stays Cursor T
   assert.equal(flowStageWebllmProfile("synthesize"), undefined);
   assert.equal(flowStageAgent("send-slack"), "cursor");
   assert.equal(flowStageWebllmProfile("send-slack"), undefined);
+  assert.equal(flowStageAgent("file-jira"), "cursor");
+  assert.equal(flowStageWebllmProfile("file-jira"), undefined);
 });
 
 test("Discovery Cursor/Claude stages declare print vs TUI", () => {
   assert.equal(getFlowStage("send-slack")?.cli, "tui");
   assert.equal(getFlowStage("file-jira")?.cli, "tui");
+  assert.equal(getFlowStage("file-jira")?.agent, "cursor");
+  assert.match(getFlowStage("file-jira")?.prompt?.system ?? "", /jira-ghe createNewJiraTicket/);
+  assert.match(getFlowStage("file-jira")?.prompt?.user ?? "", /\{\{plan\}\}/);
+  assert.match(getFlowStage("file-jira")?.prompt?.user ?? "", /\{\{jiraProject\}\}/);
   assert.equal(getFlowStage("write-plan")?.cli, "print");
   assert.equal(getFlowStage("fryme")?.cli, "print");
+  assert.equal(getFlowStage("fryme")?.maxTokens, 2000);
+  assert.match(getFlowStage("fryme")?.prompt?.system ?? "", /Return ONLY a JSON object/);
+  assert.match(getFlowStage("fryme")?.prompt?.user ?? "", /\{\{spec\}\}/);
+  assert.match(getFlowStage("fryme")?.prompt?.user ?? "", /\{\{fryme\}\}/);
+  assert.match(getFlowStage("write-plan")?.prompt?.user ?? "", /\{\{spec\}\}/);
+  assert.match(getFlowStage("write-plan")?.prompt?.user ?? "", /\{\{fryme\}\}/);
   assert.equal(getFlowStage("fry")?.id, "fryme");
   assert.equal(getFlowStage("preview-fry")?.id, "preview-fryme");
   assert.equal(getFlowStage("prep-agenda")?.cli, "print");
@@ -164,6 +229,53 @@ test("board columns match discovery.flow.json stages and omit Blocked", () => {
     columns.every((c) => !c.locked),
     true,
   );
+});
+
+test("Fry Me prompt feeds the spec, prior answers, and the Fry Me skill", () => {
+  const prompt = resolveFlowStagePrompt(
+    "fryme",
+    {
+      ...baseTicket,
+      vars: { spec: "Pinned prompt registry spec", fryme: "Round 1 already answered" },
+      outputs: { synthesize: "Pinned prompt registry spec" },
+    },
+    [{ id: "doc-fry-me", title: "Fry Me skill", kind: "skill", body: "You are Fry Me.\n\nProblem Statement & Scope: ..." }],
+  );
+  assert.ok(prompt);
+  assert.match(prompt!.system, /Problem Statement & Scope/);
+  assert.match(prompt!.system, /Return ONLY a JSON object/);
+  assert.match(prompt!.user, /Pinned prompt registry spec/);
+  assert.match(prompt!.user, /Round 1 already answered/);
+  assert.match(prompt!.user, /Start round 1|The team answered the last round/);
+});
+
+test("Plan Write Up interpolates spec plus every Fry Me question and answer", () => {
+  const prompt = resolveFlowStagePrompt("write-plan", {
+    ...baseTicket,
+    fryComplete: true,
+    outputs: { synthesize: "Pinned prompt registry spec", fryme: "Honor the pin." },
+    vars: { spec: "Pinned prompt registry spec" },
+    fryRounds: [
+      {
+        id: "r1",
+        submitted: true,
+        questions: [
+          {
+            n: 1,
+            question: "Where do prompts live?",
+            recommended: "Registry",
+            answer: "Registry keyed by column",
+            source: "spec",
+          },
+        ],
+      },
+    ],
+  });
+  assert.ok(prompt);
+  assert.match(prompt!.user, /Pinned prompt registry spec/);
+  assert.match(prompt!.user, /Where do prompts live/);
+  assert.match(prompt!.user, /Registry keyed by column/);
+  assert.match(prompt!.user, /binding decisions/);
 });
 
 test("legacy fry stage id still resolves the Fry Me prompt", () => {

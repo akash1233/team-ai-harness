@@ -1,15 +1,10 @@
 import {
-  APPROVE_COLUMN_ID,
   cloneColumns,
+  COLUMNS,
   DISCOVERY_FLOW_ID,
-  DONE_COLUMN_ID,
-  FILE_JIRA_COLUMN_ID,
-  FRY_COLUMN_ID,
-  IDEATION_COLUMN_ID,
-  PREVIEW_FRY_COLUMN_ID,
+  FRY_DOC_ID,
+  QUICK_SPEC_COLUMNS,
   QUICK_SPEC_FLOW_ID,
-  SYNTHESIZE_COLUMN_ID,
-  WRITE_PLAN_COLUMN_ID,
   migrateColumnId,
 } from "./columns.ts";
 import { mergePricing } from "./pricing.ts";
@@ -42,7 +37,6 @@ export function createDiscoveryFlow(): Flow {
     columns: stampPromptRefs(cloneColumns()),
     autoAdvance: true,
     autoRun: false,
-    continueInFlowId: QUICK_SPEC_FLOW_ID,
   };
 }
 
@@ -50,24 +44,15 @@ export function createQuickSpecFlow(): Flow {
   return {
     id: QUICK_SPEC_FLOW_ID,
     name: "Quick spec",
-    description: "Skip agenda and Slack. Brief → spec (Cursor print) → Fry Me → backlog (Cursor) → Jira.",
-    columns: stampPromptRefs(cloneColumns([
-      IDEATION_COLUMN_ID,
-      SYNTHESIZE_COLUMN_ID,
-      FRY_COLUMN_ID,
-      PREVIEW_FRY_COLUMN_ID,
-      WRITE_PLAN_COLUMN_ID,
-      APPROVE_COLUMN_ID,
-      FILE_JIRA_COLUMN_ID,
-      DONE_COLUMN_ID,
-    ])),
+    description: "Transcript → spec → Fry Me → plan → file Jira.",
+    columns: stampPromptRefs(QUICK_SPEC_COLUMNS.map((c) => ({ ...c }))),
     autoAdvance: true,
     autoRun: false,
   };
 }
 
 export function createDefaultFlows(): Flow[] {
-  return [createDiscoveryFlow(), createQuickSpecFlow()];
+  return [createQuickSpecFlow(), createDiscoveryFlow()];
 }
 
 export function createDefaultExecution(): ExecutionConfig {
@@ -112,6 +97,7 @@ export function createDefaultTeam(): TeamConfig {
     name: "Kindling",
     workflowName: active.name,
     jiraPrefix: "X2",
+    jiraComponents: "",
     defaultSlackChannel: "get-dx-insights-test",
     defaultSlackChannelId: "C0BQMKFR519",
     members: DEFAULT_MEMBERS.map((m) => ({ ...m })),
@@ -120,10 +106,10 @@ export function createDefaultTeam(): TeamConfig {
     flows,
     activeFlowId: active.id,
     docs: DEFAULT_DOCS.map((d) => ({ ...d })),
-    prompts: createDefaultPrompts(active.columns),
+    prompts: createDefaultPrompts(COLUMNS),
     theme: "paper",
     density: "comfortable",
-    pipelineLayout: "horizontal",
+    pipelineLayout: "vertical",
     showSpend: true,
     autoAdvance: active.autoAdvance,
     execution: createDefaultExecution(),
@@ -140,7 +126,13 @@ export function mergeDocs(saved?: TeamDoc[]): TeamDoc[] {
   const defaults = DEFAULT_DOCS.map((d) => ({ ...d }));
   if (!saved?.length) return defaults;
   const byId = new Map(saved.map((d) => [migrateDocId(d.id), { ...d, id: migrateDocId(d.id) }]));
-  const merged = defaults.map((d) => byId.get(d.id) ?? d);
+  const merged = defaults.map((d) => {
+    const hit = byId.get(d.id);
+    if (!hit) return d;
+    // Shipped Fry Me skill is source of truth — Settings edits are session-only.
+    if (d.id === FRY_DOC_ID) return { ...hit, title: d.title, kind: d.kind, body: d.body };
+    return hit;
+  });
   for (const d of saved) {
     const id = migrateDocId(d.id);
     if (!merged.some((m) => m.id === id)) merged.push({ ...d, id });
@@ -251,12 +243,13 @@ export function mergeTeamConfig(saved?: Partial<TeamConfig>): TeamConfig {
     ...saved,
     members: saved.members?.length ? saved.members : d.members,
     docs: mergeDocs(saved.docs),
-    prompts: createDefaultPrompts(activeColumns),
+    prompts: createDefaultPrompts(COLUMNS),
     execution: mergeExecution(saved.execution),
     connectors: mergeConnectors(saved.connectors),
     flows,
     activeFlowId,
     columns: activeColumns,
     pipelineLayout: saved.pipelineLayout === "horizontal" || saved.pipelineLayout === "vertical" ? saved.pipelineLayout : d.pipelineLayout,
+    jiraComponents: typeof saved.jiraComponents === "string" ? saved.jiraComponents : d.jiraComponents,
   });
 }

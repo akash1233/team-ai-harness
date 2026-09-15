@@ -1,3 +1,5 @@
+import { FILE_JIRA_COLUMN_ID, SEND_SLACK_COLUMN_ID } from "./columns.ts";
+import { fileJiraMcpSucceeded } from "./discovery-jira.ts";
 import { extractNotifyMcpResult } from "./discovery-slack.ts";
 import { clip, createLogger } from "./logger.ts";
 
@@ -175,6 +177,15 @@ export function notifyPostSucceeded(log: string): boolean {
   return extractNotifyMcpResult(log).found;
 }
 
+function isMcpTuiColumn(columnId?: string): boolean {
+  return columnId === SEND_SLACK_COLUMN_ID || columnId === FILE_JIRA_COLUMN_ID;
+}
+
+function mcpToolSucceeded(log: string, columnId?: string): boolean {
+  if (columnId === FILE_JIRA_COLUMN_ID) return fileJiraMcpSucceeded(log);
+  return notifyPostSucceeded(log);
+}
+
 export type SessionSnap = {
   log: string;
   exitCode: number | null;
@@ -209,9 +220,10 @@ export function evaluateLongSessionPoll(
       error: ok ? undefined : explainCliFailure(log) || `exit ${code}`,
     };
   }
-  if (notifyPostSucceeded(log)) {
-    if (opts?.columnId === "send-slack" && opts.notifyMcpSeenAt !== undefined) {
-      if (Date.now() - opts.notifyMcpSeenAt < notifyMcpSettleMs()) {
+  if (mcpToolSucceeded(log, opts?.columnId)) {
+    const seenAt = opts?.notifyMcpSeenAt;
+    if (isMcpTuiColumn(opts?.columnId) && seenAt !== undefined) {
+      if (Date.now() - seenAt < notifyMcpSettleMs()) {
         return { done: false, ok: true };
       }
     }
@@ -221,7 +233,7 @@ export function evaluateLongSessionPoll(
   const mtime = snap.mtimeMs ?? snap.startedAt;
   const idle = Date.now() - mtime > LONG_SESSION_IDLE_MS;
 
-  if (opts?.columnId !== "send-slack" && idle && log.length > 200 && !isNoiseLog(log)) {
+  if (!isMcpTuiColumn(opts?.columnId) && idle && log.length > 200 && !isNoiseLog(log)) {
     return { done: true, ok: true };
   }
   if (age > LONG_SESSION_HARD_CAP_MS) {

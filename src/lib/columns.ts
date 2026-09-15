@@ -1,4 +1,5 @@
 import discoveryFlowJson from "../../flows/discovery.flow.json" with { type: "json" };
+import quickSpecFlowJson from "../../flows/quick-spec.flow.json" with { type: "json" };
 import type { FlowSpec, FlowStageSpec } from "./flow-spec.ts";
 import type { ColumnRole, RailTone, StageCliMode, StepAgent, WebllmProfile, WorkflowColumn } from "./types";
 
@@ -107,6 +108,9 @@ export function columnsFromFlowSpec(flow: FlowSpec): WorkflowColumn[] {
 
 /** Discovery board. Source of truth: flows/discovery.flow.json — no extra locked columns. */
 export const COLUMNS: WorkflowColumn[] = columnsFromFlowSpec(discoveryFlowJson as FlowSpec);
+
+/** Quick spec board. Source of truth: flows/quick-spec.flow.json (transcript → Done). */
+export const QUICK_SPEC_COLUMNS: WorkflowColumn[] = columnsFromFlowSpec(quickSpecFlowJson as FlowSpec);
 
 export function columnById(
   id: string,

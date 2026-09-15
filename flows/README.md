@@ -8,6 +8,12 @@ Kindling stage lists, agents, prompts, and variable contracts live here as JSON.
 
 Stages: Brief → Agenda → Review agenda → Notify → Notes → Spec → Fry Me → Backlog → File → Done.
 
+## Quick spec flow (default)
+
+**File:** [`quick-spec.flow.json`](./quick-spec.flow.json)
+
+Stages copied from Discovery stage 05 onward: Add Sana Transcript → Spec → Review spec → Fry Me → Review Fry Me → Plan → Sign-off → File Jira → Done. No Brief, Agenda, or Slack.
+
 Loader: [`src/lib/flow-spec.ts`](../src/lib/flow-spec.ts) (`columnsFromFlowSpec`, `resolveFlowStagePrompt`, `listFlowVariables`). There is no extra hardcoded Blocked column.
 
 ## System variables
@@ -24,6 +30,7 @@ Use any token below in a stage `prompt.system` or `prompt.user` string. If a tok
 | `{{spec}}` | Spec document | Spec Run |
 | `{{fryme}}` | Fry Me Q&A record | Fry Me rounds / harvest |
 | `{{plan}}` | Backlog plan JSON string | Backlog Run |
+| `{{jira_filed}}` | Created epic/story keys | After File Jira harvest |
 | `{{slack_post}}` | Notify post summary | After Slack MCP |
 | `{{prev}}` | Last stage output | Every harvest |
 
@@ -42,6 +49,8 @@ Use any token below in a stage `prompt.system` or `prompt.user` string. If a tok
 
 | Token | Description |
 | --- | --- |
+| `{{jiraProject}}` | Project key for createNewJiraTicket (from ticket key, e.g. `X2`) |
+| `{{jiraComponents}}` | Component names from **Settings → Team**. Override on the ticket or in stage test. Empty → Cursor asks or copies from a linked issue |
 | `{{jira}}` | **All** selected issues: `KEY title` + description each, blank-line separated |
 | `{{jira.key}}`, `{{jira.title}}`, `{{jira.description}}`, `{{jira.status}}`, `{{jira.url}}` | **First** linked issue only |
 | `{{jira.X2-698}}` | Full block for one issue (key varies) |
@@ -76,4 +85,4 @@ Use any token below in a stage `prompt.system` or `prompt.user` string. If a tok
 4. On Cursor/Claude stages, set `"cli": "print"` (one-shot `-p`) or `"cli": "tui"` (interactive Terminal). Omit = print. WebLLM/manual/review ignore it.
 5. Run `npm run test:kindling` — `flow-spec.test.ts` validates tokens against the catalog.
 
-Quick Spec flow JSON is not shipped yet; add `flows/quick-spec.flow.json` using the same pattern when needed.
+The board boots on Quick spec. Switch to Discovery in the header **Flow** menu.

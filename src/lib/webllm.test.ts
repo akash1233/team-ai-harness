@@ -74,6 +74,10 @@ test("Notify cannot run WebLLM", () => {
   assert.equal(webllmBlockedReason("prep-agenda"), undefined);
 });
 
+test("File Jira cannot run WebLLM", () => {
+  assert.match(webllmBlockedReason("file-jira") ?? "", /jira-ghe/);
+});
+
 test("Cursor still resolves for Notify and pinned Cursor stages", () => {
   const notify = resolveStep({ agent: "cursor", id: SEND_SLACK_COLUMN_ID, role: "prompt" }, exec);
   assert.equal(notify.kind, "cursor");

@@ -28,6 +28,7 @@ export function useStagePayload(ticket: Ticket) {
     slackChannelId: ticket.slackChannelId,
     outputs: ticket.outputs,
     vars: ticket.vars,
+    stageTestVars: ticket.stageTestVars,
     transcript: ticket.transcript,
     linkedJiras: ticket.linkedJiras,
     linkedRepo: ticket.linkedRepo,
@@ -40,6 +41,7 @@ export function useStagePayload(ticket: Ticket) {
     agent: column?.agent,
     promptRef: column?.promptRef,
     webllmProfile: column?.webllmProfile,
+    jiraComponents: config.jiraComponents,
   });
 
   const load = useCallback(async () => {
@@ -54,6 +56,7 @@ export function useStagePayload(ticket: Ticket) {
           promptTemplate: resolved.baseBody || column?.promptTemplate,
           docs: resolved.docs,
           jira: config.connectors.jira,
+          jiraComponents: config.jiraComponents,
           jiraKeys: resolved.jiraKeys,
           jiraIssues: config.connectors.issues.filter((issue) =>
             resolved.jiraKeys.some((key) => key.toUpperCase() === issue.key.toUpperCase()),

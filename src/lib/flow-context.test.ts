@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { COLUMNS } from "./columns.ts";
-import { buildContext, buildUpstream, harvestBriefVars, harvestNotifyVars, harvestReviewVars, harvestVars, interpolate, mentionedKeys, outputVarName, reviewSourceText, syncNotifyPreviewVars } from "./flow-context.ts";
+import { buildContext, buildUpstream, harvestBriefVars, harvestFileJiraVars, harvestNotifyVars, harvestReviewVars, harvestVars, interpolate, mentionedKeys, outputVarName, reviewSourceText, syncNotifyPreviewVars } from "./flow-context.ts";
 import type { Ticket, WorkflowColumn } from "./types.ts";
 
 const col: WorkflowColumn = {
@@ -49,6 +49,37 @@ test("interpolate fills ticket and stage vars", () => {
   assert.match(out, /pin the prompt/);
 });
 
+test("buildContext derives jiraProject from the ticket key", () => {
+  const ctx = buildContext(ticket);
+  assert.equal(ctx.jiraProject, "X2");
+});
+
+test("buildContext uses team jiraComponents when the ticket has none", () => {
+  const ctx = buildContext(ticket, undefined, { jiraComponents: "Backend, X2" });
+  assert.equal(ctx.jiraComponents, "Backend, X2");
+});
+
+test("ticket jiraComponents wins over the team default", () => {
+  const ctx = buildContext(
+    { ...ticket, vars: { ...ticket.vars, jiraComponents: "Frontend" } },
+    undefined,
+    { jiraComponents: "Backend" },
+  );
+  assert.equal(ctx.jiraComponents, "Frontend");
+});
+
+test("harvestFileJiraVars publishes jira_filed from created issues", () => {
+  const col = COLUMNS.find((c) => c.id === "file-jira")!;
+  const vars = harvestFileJiraVars(
+    ticket,
+    col,
+    [{ key: "X2-910", title: "Epic: Prompt registry", kind: "epic" }],
+    "",
+  );
+  assert.match(vars.jira_filed, /X2-910/);
+  assert.match(vars.prev, /Prompt registry/);
+});
+
 test("missing vars become empty string, not the token", () => {
   assert.equal(interpolate("A {{missing}} Z", {}), "A  Z");
 });
@@ -86,6 +117,36 @@ test("harvestReviewVars writes approved key and updates the source variable", ()
 
 test("mentionedKeys lists unique tokens", () => {
   assert.deepEqual(mentionedKeys("{{spec}} then {{spec}} and {{fryme}}"), ["spec", "fryme"]);
+});
+
+test("buildContext exposes Fry Me per-question vars for later stages", () => {
+  const t = {
+    ...ticket,
+    fryComplete: true,
+    outputs: { fryme: "Honor the pin." },
+    vars: { spec: "Pinned prompt registry" },
+    fryRounds: [
+      {
+        id: "r1",
+        submitted: true,
+        questions: [
+          {
+            n: 1,
+            question: "Where do prompts live?",
+            recommended: "Registry",
+            answer: "Registry keyed by column",
+            source: "spec",
+          },
+        ],
+      },
+    ],
+  };
+  const ctx = buildContext(t);
+  assert.equal(ctx["fryme.1.question"], "Where do prompts live?");
+  assert.equal(ctx["fryme.1.answer"], "Registry keyed by column");
+  assert.match(ctx.fryme, /Registry keyed by column/);
+  assert.match(interpolate("Spec:\n{{spec}}\n\nFry Me:\n{{fryme}}\nQ1:\n{{fryme.1.answer}}", ctx), /Pinned prompt registry/);
+  assert.match(interpolate("{{fryme.1.answer}}", ctx), /Registry keyed by column/);
 });
 
 test("{{grill}} still interpolates after the Fry Me rename", () => {

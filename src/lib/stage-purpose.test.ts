@@ -17,6 +17,12 @@ test("stagePurpose uses output key and role, not last-run text", () => {
   assert.match(stagePurpose(done), /Finished/);
 });
 
+test("stagePurpose notes test mode", () => {
+  const spec = COLUMNS.find((c) => c.id === SYNTHESIZE_COLUMN_ID)!;
+  assert.doesNotMatch(stagePurpose(spec), /Test this stage/);
+  assert.match(stagePurpose({ ...spec, testMode: true }), /Test this stage/);
+});
+
 test("previewLine is a single short line", () => {
   const dump = "Sentinel - Bug Bash\nDate: August 28, 2026\nAttendees: everyone";
   assert.equal(previewLine(dump), "Sentinel - Bug Bash");

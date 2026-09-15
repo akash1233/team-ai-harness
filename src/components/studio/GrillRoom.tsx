@@ -36,7 +36,7 @@ export function GrillRoom({ ticket }: { ticket: Ticket }) {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted">
-          Fry the spec from Synthesize. {step.label} runs the Fry Me skill. The team answers every question — typed or spoken. Those answers are what Write plan reads.
+          Fry the spec from Synthesize. {step.label} runs the Fry Me skill. The team answers every question — typed or spoken. Each answer is stored as an output variable for Write plan.
         </p>
         <SpecBlock spec={spec} />
         <DocsLine docs={docs} />

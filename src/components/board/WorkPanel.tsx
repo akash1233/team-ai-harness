@@ -14,6 +14,7 @@ import { GrillRoom } from "@/components/studio/GrillRoom";
 import { RunLog } from "@/components/studio/RunLog";
 import { PayloadEditor, useStagePayload } from "@/components/studio/PayloadEditor";
 import type { Ticket, WorkflowColumn } from "@/lib/types";
+import { applyStageTestVars, isLongStageTestKey, isStageTestable, seedStageTestValues, stageTestInputKeys } from "@/lib/stage-test";
 import { createDefaultConnectors } from "@/lib/connectors";
 import { pullJiraIssue } from "@/lib/connectors-api";
 
@@ -22,6 +23,7 @@ export function WorkPanel() {
   const tickets = useBoardStore((s) => s.tickets);
   const config = useBoardStore((s) => s.config);
   const select = useBoardStore((s) => s.select);
+  const updateColumn = useBoardStore((s) => s.updateColumn);
   const ticket = tickets.find((t) => t.id === selectedId) ?? null;
   if (!ticket) return null;
   const col = columnById(ticket.columnId, config.columns);
@@ -37,6 +39,16 @@ export function WorkPanel() {
           <p className="mt-1 text-sm text-muted">{col ? stagePurpose(col) : ""}</p>
           {config.showSpend ? (
             <p className="mt-1 font-mono text-micro tabular-nums text-subtle">{formatSpend(ticket.spend)}</p>
+          ) : null}
+          {col && isStageTestable(col) ? (
+            <label className="mt-2 flex min-h-11 items-center gap-2 text-sm text-fg">
+              <input
+                type="checkbox"
+                checked={Boolean(col.testMode)}
+                onChange={(e) => updateColumn(col.id, { testMode: e.target.checked })}
+              />
+              Test this stage
+            </label>
           ) : null}
         </div>
         <button
@@ -58,7 +70,7 @@ export function WorkPanel() {
           </pre>
         ) : null}
         <ContextAttach ticket={ticket} />
-        <FlowVars ticket={ticket} />
+        {col?.testMode ? <StageTestPanel ticket={ticket} col={col} /> : <FlowVars ticket={ticket} />}
         <StepBody ticket={ticket} />
         <section className="mt-6">
           <h3 className="mb-2 font-serif text-base font-medium">Agent log</h3>
@@ -155,6 +167,82 @@ function ContextAttach({ ticket }: { ticket: Ticket }) {
   );
 }
 
+function StageTestPanel({ ticket, col }: { ticket: Ticket; col: WorkflowColumn }) {
+  const updateTicket = useBoardStore((s) => s.updateTicket);
+  const jiraComponents = useBoardStore((s) => s.config.jiraComponents);
+  const keys = stageTestInputKeys(col);
+  const seeded = seedStageTestValues(ticket, keys, { jiraComponents });
+  const values = { ...seeded, ...(ticket.stageTestVars ?? {}) };
+  const dirty = Boolean(ticket.stageTestVars && Object.keys(ticket.stageTestVars).length);
+
+  function setKey(key: string, value: string) {
+    updateTicket(ticket.id, {
+      stageTestVars: { ...(ticket.stageTestVars ?? {}), [key]: value },
+    });
+  }
+
+  function reset() {
+    updateTicket(ticket.id, { stageTestVars: undefined });
+  }
+
+  function applyNow() {
+    updateTicket(ticket.id, applyStageTestVars(ticket, values));
+  }
+
+  return (
+    <section className="mb-4 rounded-md border border-border bg-inset px-3 py-3">
+      <p className="text-micro uppercase tracking-widest text-subtle">Stage test</p>
+      <p className="mt-1 text-2xs text-muted">
+        Values seed from last stages. Edit any field to override. This run stays on{" "}
+        <span className="text-fg">{col.label}</span> — it will not auto-advance.
+      </p>
+      {keys.length === 0 ? (
+        <p className="mt-2 text-2xs text-muted">This stage has no {"{{variables}}"} to seed.</p>
+      ) : (
+        <ul className="mt-3 flex flex-col gap-3">
+          {keys.map((key) => {
+            const value = values[key] ?? "";
+            const overridden = ticket.stageTestVars?.[key] !== undefined;
+            return (
+              <li key={key}>
+                <label className="flex flex-col gap-1">
+                  <span className="font-mono text-2xs text-fg">
+                    {`{{${key}}}`}
+                    {overridden ? <span className="ml-2 font-sans text-subtle">overridden</span> : <span className="ml-2 font-sans text-subtle">from last stages</span>}
+                  </span>
+                  {isLongStageTestKey(key) ? (
+                    <Textarea
+                      className="min-h-24 font-mono text-2xs"
+                      value={value}
+                      onChange={(e) => setKey(key, e.target.value)}
+                      placeholder={`Paste or edit {{${key}}}`}
+                    />
+                  ) : (
+                    <Input
+                      className="font-mono text-2xs"
+                      value={value}
+                      onChange={(e) => setKey(key, e.target.value)}
+                      placeholder={`{{${key}}}`}
+                    />
+                  )}
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" variant="secondary" size="md" onClick={reset} disabled={!dirty}>
+          Reset from last stages
+        </Button>
+        <Button type="button" variant="secondary" size="md" onClick={applyNow} disabled={keys.length === 0}>
+          Apply to ticket
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function FlowVars({ ticket }: { ticket: Ticket }) {
   if (ticket.columnId === "ideation") return null;
   const config = useBoardStore((s) => s.config);
@@ -194,11 +282,12 @@ function FlowVars({ ticket }: { ticket: Ticket }) {
 }
 
 function ResolvedVars({ ticket }: { ticket: Ticket }) {
+  const jiraComponents = useBoardStore((s) => s.config.jiraComponents);
   const stage = getFlowStage(ticket.columnId);
   if (!stage?.prompt) return null;
   const keys = flowStageMentionedKeys(stage);
   if (!keys.length) return null;
-  const ctx = buildContext(ticket);
+  const ctx = buildContext(ticket, undefined, { jiraComponents });
   return (
     <section className="rounded-md border border-border bg-inset px-3 py-2">
       <p className="text-micro uppercase tracking-widest text-subtle">Values sent to the agent</p>
@@ -529,12 +618,41 @@ function RunForm({ ticket }: { ticket: Ticket }) {
 
 function JiraForm({ ticket }: { ticket: Ticket }) {
   const runTicket = useBoardStore((s) => s.runTicket);
+  const finishLiveSession = useBoardStore((s) => s.finishLiveSession);
   const busy = ticket.status === "executing";
   const payload = useStagePayload(ticket);
+  const hasOutput = Boolean(ticket.outputs[ticket.columnId] || ticket.jiraCreated.length);
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted">Creates issues from the approved plan only. Simulated Jira.</p>
+      <p className="text-sm text-muted">
+        Opens Cursor. Approve <span className="font-mono text-fg">jira-ghe createNewJiraTicket</span> to file
+        epics and stories from the signed-off plan. Do not invent extra scope.
+      </p>
       {ticket.plan ? <PlanPreview ticket={ticket} /> : <p className="text-sm text-danger">No approved plan.</p>}
+      {ticket.sessionDir ? (
+        <>
+          <p className="text-2xs text-muted">
+            Approve the jira-ghe tool calls in Terminal, then close the window or click Done — Kindling
+            harvests the created keys.
+          </p>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-mono text-2xs">
+            {ticket.liveLog || "Waiting for Terminal…"}
+          </pre>
+          <Button
+            variant="secondary"
+            size="md"
+            className="w-full"
+            onClick={() => void finishLiveSession(ticket.id)}
+          >
+            Done — harvest &amp; continue
+          </Button>
+        </>
+      ) : hasOutput ? (
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-inset p-3 font-sans text-sm leading-relaxed">
+          {ticket.outputs[ticket.columnId] ||
+            ticket.jiraCreated.map((issue) => `${issue.key}  ${issue.title}`).join("\n")}
+        </pre>
+      ) : null}
       <PayloadEditor
         payload={payload.payload}
         onChange={payload.setPayload}
@@ -548,13 +666,10 @@ function JiraForm({ ticket }: { ticket: Ticket }) {
         size="md"
         className="w-full"
         disabled={busy || !ticket.plan || payload.loading || !payload.payload}
-        onClick={async () => {
-          await runTicket(ticket.id, payload.payload ?? undefined);
-          toast.success("Filed Jira issues");
-        }}
+        onClick={() => void runTicket(ticket.id, payload.payload ?? undefined)}
       >
         {busy ? <RotateCw className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />}
-        File in Jira
+        {busy ? "Filing in Cursor…" : "File in Jira"}
       </Button>
     </div>
   );

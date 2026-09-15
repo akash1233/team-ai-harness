@@ -1,7 +1,8 @@
 import discoveryFlowJson from "../../flows/discovery.flow.json" with { type: "json" };
+import quickSpecFlowJson from "../../flows/quick-spec.flow.json" with { type: "json" };
 import { isAgentKind } from "./agents.ts";
 import { FRY_COLUMN_ID, migrateColumnId } from "./columns.ts";
-import { buildContext, interpolate, mentionedKeys } from "./flow-context.ts";
+import { buildContext, interpolate, mentionedKeys, type TeamContextDefaults } from "./flow-context.ts";
 import type { StepAgent, TeamDoc, Ticket, WebllmProfile } from "./types.ts";
 import { isWebllmProfile } from "./webllm.ts";
 
@@ -35,6 +36,10 @@ const DISCOVERY_FLOW_PATH = "flows/discovery.flow.json";
 
 export function loadDiscoveryFlowSpec(): FlowSpec {
   return discoveryFlowJson as FlowSpec;
+}
+
+export function loadQuickSpecFlowSpec(): FlowSpec {
+  return quickSpecFlowJson as FlowSpec;
 }
 
 /** Reset cached spec (tests) — no-op with static JSON import. */
@@ -74,7 +79,9 @@ export function validateStagePrompt(stage: FlowStageSpec, flow: FlowSpec = loadD
   const catalog = new Set(Object.keys(flow.variables));
   catalog.add("grillPhase");
   catalog.add("frymePhase");
-  return flowStageMentionedKeys(stage).filter((key) => !catalog.has(key) && !key.startsWith("jira."));
+  return flowStageMentionedKeys(stage).filter(
+    (key) => !catalog.has(key) && !key.startsWith("jira.") && !key.startsWith("fryme."),
+  );
 }
 
 function frymePhase(ticket: Ticket, frySubmit?: boolean): string {
@@ -98,12 +105,12 @@ export function resolveFlowStagePrompt(
   stageId: string,
   ticket: Ticket,
   docs?: TeamDoc[],
-  opts?: { frySubmit?: boolean; promptTemplate?: string },
+  opts?: { frySubmit?: boolean; promptTemplate?: string; team?: TeamContextDefaults },
 ): { system: string; user: string; max: number } | undefined {
   const stage = getFlowStage(stageId);
   const live = opts?.promptTemplate?.trim() || undefined;
   const jsonBody = jsonPromptBody(stage);
-  const ctx = buildContext(ticket, docs);
+  const ctx = buildContext(ticket, docs, opts?.team);
   if (stage?.id === FRY_COLUMN_ID) {
     const phase = frymePhase(ticket, opts?.frySubmit);
     ctx.frymePhase = phase;

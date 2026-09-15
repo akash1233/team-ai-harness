@@ -11,7 +11,7 @@ import {
 export type Fallback = {
   text: string;
   plan?: Plan;
-  fry?: { frontierEmpty: boolean; questions: FryQuestion[] };
+  fry?: { frontierEmpty: boolean; questions: FryQuestion[]; conclusions?: string };
 };
 
 function q(n: number, question: string, recommended: string): FryQuestion {

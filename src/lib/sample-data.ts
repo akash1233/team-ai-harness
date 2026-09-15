@@ -1,12 +1,13 @@
 import type { Ticket, WorkflowColumn } from "./types.ts";
 import {
-  DISCOVERY_FLOW_ID,
-  IDEATION_COLUMN_ID,
+  QUICK_SPEC_FLOW_ID,
+  TRANSCRIPT_COLUMN_ID,
   WRITE_PLAN_COLUMN_ID,
   columnIdAliases,
   isFryStage,
 } from "./columns.ts";
 import { outputVarName } from "./flow-context.ts";
+import { isFryVarKey } from "./grill.ts";
 
 function iso(h: number, m: number, s = 0) {
   return new Date(Date.UTC(2026, 7, 28, h + 4, m, s)).toISOString();
@@ -25,7 +26,7 @@ export function createSampleTickets(): Ticket[] {
       title: "Add Prompts in Jira BDD Assistant - X2",
       description: "",
       labels: [],
-      columnId: IDEATION_COLUMN_ID,
+      columnId: TRANSCRIPT_COLUMN_ID,
       status: "idle",
       spend: 0,
       runId: "",
@@ -45,7 +46,7 @@ export function createSampleTickets(): Ticket[] {
   ];
   return rows.map((t) => ({
     ...t,
-    flowId: t.flowId ?? DISCOVERY_FLOW_ID,
+    flowId: t.flowId ?? QUICK_SPEC_FLOW_ID,
     vars: t.vars ?? {},
     linkedJiras: t.linkedJiras ?? [],
   }));
@@ -74,6 +75,7 @@ export function clearTicketHistory(
     agentResponses: [],
     outputs: {},
     vars: {},
+    stageTestVars: undefined,
     fryRounds: [],
     fryComplete: false,
     plan: null,
@@ -95,11 +97,14 @@ export function beginStageRun(
   opts?: { loadingText?: string; keepFryRounds?: boolean },
 ): Ticket {
   const key = outputVarName(column);
-  const aliases = [
-    ...columnIdAliases(column.id),
-    ...(key ? [key] : []),
-    ...(isFryStage(column.id) ? ["fryme", "grill", "fyyme", "fry"] : []),
-  ];
+  const keepFry = isFryStage(column.id) && Boolean(opts?.keepFryRounds);
+  const aliases = keepFry
+    ? []
+    : [
+        ...columnIdAliases(column.id),
+        ...(key ? [key] : []),
+        ...(isFryStage(column.id) ? ["fryme", "grill", "fyyme", "fry"] : []),
+      ];
   const oldBody =
     ticket.outputs[column.id] ||
     aliases.map((id) => ticket.outputs[id]).find((value) => value?.trim()) ||
@@ -110,6 +115,14 @@ export function beginStageRun(
   for (const id of aliases) {
     delete outputs[id];
     delete vars[id];
+  }
+  if (isFryStage(column.id) && !keepFry) {
+    for (const name of Object.keys(vars)) {
+      if (isFryVarKey(name)) delete vars[name];
+    }
+    for (const name of Object.keys(outputs)) {
+      if (isFryVarKey(name)) delete outputs[name];
+    }
   }
   if (oldBody && vars.prev === oldBody) delete vars.prev;
   return {

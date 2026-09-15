@@ -1,7 +1,7 @@
 {
-  "id": "flow-discovery",
-  "name": "Discovery",
-  "description": "Brief → agenda → notify → notes → spec → fry me → backlog → file",
+  "id": "flow-quick-spec",
+  "name": "Quick spec",
+  "description": "Transcript → spec → fry me → plan → file Jira",
   "variables": {
     "brief": "Brief composed text from manual Save (Slack channel, ID, members, notes)",
     "agenda": "Full agenda document from Agenda stage",
@@ -47,45 +47,6 @@
     "input": "Generic manual capture"
   },
   "stages": [
-    {
-      "id": "ideation",
-      "label": "Brief",
-      "role": "collect-input",
-      "agent": "manual",
-      "writes": ["brief", "slackChannel", "slackChannelId", "slack.members", "prev"]
-    },
-    {
-      "id": "prep-agenda",
-      "label": "Agenda",
-      "role": "prompt",
-      "agent": "cursor",
-      "cli": "print",
-      "writes": ["agenda", "prev"],
-      "maxTokens": 1100,
-      "prompt": {
-        "system": "Write a Team Discussion Agenda with exactly these sections , if there are multiple jira's create section for each and call the jira clearly:\n1. Problem / Goals / Metrics\n2. Users / Personas / Stories\n3. Research (competitors / data)\n4. Features / UI / API\n5. Risks / Out of scope / Tech\n6. Priorities\nEnd with: Record the full meeting.\nDo not send Slack. Do not create Jira issues. Agenda document only.\n\nBusiness rules:\n- Brief below = meeting logistics (channel, attendees).\n- Every attached Jira issue = product context; cover all of them, not just the first.\n- If no Jira is attached, use Brief notes only.",
-        "user": "Brief (logistics):\n{{brief}}\n\nAll attached Jira issues (product context):\n{{jira}}\n\nWrite the agenda now."
-      }
-    },
-    {
-      "id": "preview-agenda",
-      "writes": ["approved-agenda", "prev"],
-      "label": "Approve Agenda",
-      "role": "review"
-    },
-    {
-      "id": "send-slack",
-      "label": "Notify",
-      "role": "prompt",
-      "agent": "cursor",
-      "cli": "tui",
-      "writes": ["slack_post", "slackMessage", "slack.ts", "prev"],
-      "maxTokens": 8000,
-      "prompt": {
-        "system": "slack-mcp slack_write → chat.postMessage",
-        "user": "Post the approved agenda to Slack using slack-mcp slack_write.\n\nCall slack_write with method chat.postMessage and params channel + text.\nApprove the slack_write tool call when Cursor prompts.\n\nChannel ID: {{slackChannelId}}\nChannel: #{{slackChannel}}\n\nPost this message verbatim:\n\n{{slackMessage}}"
-      }
-    },
     {
       "id": "transcript",
       "label": "Add Sana Transcript",

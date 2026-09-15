@@ -11,7 +11,15 @@ test("Notify column defaults to Cursor with slackMessage prompt", () => {
   assert.match(notify?.promptTemplate ?? "", /slack-mcp/);
 });
 
-test("default prompts seed from stages and Fry Me attaches grill-me skill", () => {
+test("File Jira column defaults to Cursor TUI with jira-ghe createNewJiraTicket", () => {
+  const fileJira = COLUMNS.find((c) => c.id === "file-jira");
+  assert.equal(fileJira?.agent, "cursor");
+  assert.equal(fileJira?.cli, "tui");
+  assert.match(fileJira?.promptTemplate ?? "", /createNewJiraTicket/);
+  assert.match(fileJira?.promptTemplate ?? "", /\{\{plan\}\}/);
+});
+
+test("default prompts seed from stages and Fry Me attaches fry-me skill", () => {
   const prompts = createDefaultPrompts(COLUMNS);
   const agenda = prompts.find((p) => p.id === `prompt-${PREP_AGENDA_COLUMN_ID}`);
   const grill = prompts.find((p) => p.id === `prompt-${FRY_COLUMN_ID}`);
@@ -98,6 +106,20 @@ test("mergePrompts canonicalizes seeded defaults from the flow JSON", () => {
   const merged = mergePrompts(undefined, COLUMNS);
   const spec = merged.find((p) => p.id === "prompt-synthesize");
   assert.match(spec?.body ?? "", /Turn the current conversation into a spec/);
+});
+
+test("mergeDocs reloads the shipped Fry Me skill over a saved Grill Me body", async () => {
+  const { mergeDocs } = await import("./team-config.ts");
+  const { FRY_ME_SKILL } = await import("./grill-skill.ts");
+  const merged = mergeDocs([
+    { id: "doc-grill-me", title: "Grill Me", kind: "skill", body: "You are Grill Me. Interview relentlessly." },
+    { id: "doc-discovery-conventions", title: "Discovery conventions", kind: "notes", body: "custom notes" },
+  ]);
+  const skill = merged.find((d) => d.id === "doc-fry-me");
+  assert.equal(skill?.title, "Fry Me skill");
+  assert.equal(skill?.body, FRY_ME_SKILL);
+  assert.match(skill?.body ?? "", /Problem Statement & Scope/);
+  assert.equal(merged.find((d) => d.id === "doc-discovery-conventions")?.body, "custom notes");
 });
 
 test("mergeColumns discards saved columns and reloads discovery.flow.json", async () => {

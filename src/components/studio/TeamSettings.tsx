@@ -18,7 +18,8 @@ import { ConnectTab } from "@/components/studio/ConnectTab";
 import { createDefaultConnectors } from "@/lib/connectors";
 import { pullJiraIssue } from "@/lib/connectors-api";
 import { bindJiraKey, unbindJiraKey } from "@/lib/prompts";
-import { SEND_SLACK_COLUMN_ID } from "@/lib/columns";
+import { FILE_JIRA_COLUMN_ID, SEND_SLACK_COLUMN_ID } from "@/lib/columns";
+import { isStageTestable } from "@/lib/stage-test";
 import { FlowSpecWarning } from "@/components/studio/FlowSpecWarning";
 
 const TABS = ["Team", "Flows", "Pipeline", "Prompts", "Skills", "Connect", "WebLLM", "Execution", "Look"] as const;
@@ -140,6 +141,16 @@ function TeamTab() {
             value={config.jiraPrefix}
             onChange={(e) => patchConfig({ jiraPrefix: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "") })}
           />
+        </Field>
+        <Field label="Jira components">
+          <Input
+            value={config.jiraComponents}
+            placeholder="Names as in Jira, comma-separated"
+            onChange={(e) => patchConfig({ jiraComponents: e.target.value })}
+          />
+          <span className="mt-1 block text-2xs text-muted">
+            Used as {"{{jiraComponents}}"} when File Jira calls createNewJiraTicket.
+          </span>
         </Field>
         <Field label="Default Slack channel">
           <Input
@@ -408,6 +419,9 @@ function FlowsTab() {
         </select>
       </Field>
       <p className="text-2xs text-muted">
+        File Jira always lands on Done. Continue is a button on the Done panel — it does not switch pipelines by itself.
+      </p>
+      <p className="text-2xs text-muted">
         Edit stages for <span className="text-fg">{flow.name}</span> on the Pipeline tab. Prompts may use {"{{brief}}"} {"{{spec}}"} {"{{fryme}}"} {"{{plan}}"} {"{{transcript}}"} {"{{prev}}"} {"{{ticket.title}}"}.
       </p>
     </div>
@@ -428,7 +442,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
     <div className="flex flex-col gap-3">
       <div className="rounded-md border border-border bg-inset px-3 py-2 text-sm text-muted">
         <p>
-          This tab only <strong className="font-medium text-fg">designs</strong> the flow. Run it on the board. Pin <strong className="font-medium text-fg">Who runs it</strong> to Cursor, Claude, Studio, CIS, or WebLLM. WebLLM stages also get a performance picker (Fast / Balanced / Quality). Cursor/Claude stages also pick <strong className="font-medium text-fg">Print</strong> (one-shot CLI) or <strong className="font-medium text-fg">TUI</strong> (interactive Terminal). Notify stays on Cursor TUI. The variable is the last agent reply only — no logs.
+          This tab only <strong className="font-medium text-fg">designs</strong> the flow. Run it on the board. Pin <strong className="font-medium text-fg">Who runs it</strong> to Cursor, Claude, Studio, CIS, or WebLLM. WebLLM stages also get a performance picker (Fast / Balanced / Quality). Cursor/Claude stages also pick <strong className="font-medium text-fg">Print</strong> (one-shot CLI) or <strong className="font-medium text-fg">TUI</strong> (interactive Terminal). Notify stays on Cursor TUI. Check <strong className="font-medium text-fg">Test</strong> on a step to run that stage alone with last-stage values prefilled (you can override them). The variable is the last agent reply only — no logs.
         </p>
       </div>
       <FlowSpecWarning />
@@ -469,7 +483,7 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                   value={col.agent ?? "inherit"}
                   onChange={(e) => updateColumn(col.id, { agent: e.target.value as StepAgent })}
                 >
-                  {(col.id === SEND_SLACK_COLUMN_ID
+                  {(col.id === SEND_SLACK_COLUMN_ID || col.id === FILE_JIRA_COLUMN_ID
                     ? STEP_AGENTS.filter((a) => a.id !== "webllm")
                     : STEP_AGENTS
                   ).map((a) => (
@@ -562,6 +576,16 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                   onChange={(e) => updateColumn(col.id, { outputKey: e.target.value.trim() })}
                 />
               </label>
+              {isStageTestable(col) ? (
+                <label className="flex h-11 items-center gap-2 px-2 text-sm" title="Run this stage alone. Inputs seed from last stages; you can override them.">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(col.testMode)}
+                    onChange={(e) => updateColumn(col.id, { testMode: e.target.checked })}
+                  />
+                  Test
+                </label>
+              ) : null}
               <label className="flex h-11 items-center gap-2 px-2 text-sm">
                 <input
                   type="checkbox"
@@ -612,6 +636,13 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
                   <span className="font-mono text-fg">{"{{slackMessage}}"}</span>
                 </>
               ) : null}
+              {col.id === FILE_JIRA_COLUMN_ID ? (
+                <>
+                  {" · "}Cursor CLI files via <span className="font-mono text-fg">jira-ghe</span>{" "}
+                  <span className="font-mono text-fg">createNewJiraTicket</span> from{" "}
+                  <span className="font-mono text-fg">{"{{plan}}"}</span>
+                </>
+              ) : null}
               {col.outputKey ? (
                 <>
                   {" · "}later stages read <span className="font-mono text-fg">{`{{${col.outputKey}}}`}</span>
@@ -619,6 +650,13 @@ function PipelineTab({ onEditPrompt }: { onEditPrompt: (id: string) => void }) {
               ) : (
                 " · set a variable name so later stages can use this output"
               )}
+              {col.testMode ? (
+                <>
+                  {" · "}
+                  <span className="text-fg">Test on</span>
+                  {" — work panel seeds this stage from last-stage values; edit to override; run does not advance"}
+                </>
+              ) : null}
             </p>
           </li>
         ))}

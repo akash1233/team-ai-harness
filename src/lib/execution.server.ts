@@ -1,4 +1,6 @@
 import { createDefaultExecution } from "./team-config.ts";
+import { FILE_JIRA_COLUMN_ID, SEND_SLACK_COLUMN_ID } from "./columns.ts";
+import { fileJiraMcpSucceeded } from "./discovery-jira.ts";
 import { isAgentKind, legacyDefaultAgent, resolveStageCli, resolveStep } from "./agents.ts";
 import { isWebllmProfile } from "./webllm.ts";
 import { computeSpend, extractUsage, mergePricing, ratesFor, usageFromText } from "./pricing.ts";
@@ -1302,7 +1304,10 @@ export async function pollAgentTest(
   }
   if (opts?.longSession) {
     let notifyMcpSeenAt: number | undefined;
-    if (opts.columnId === "send-slack" && notifyPostSucceeded(snap.log)) {
+    if (
+      (opts.columnId === SEND_SLACK_COLUMN_ID && notifyPostSucceeded(snap.log)) ||
+      (opts.columnId === FILE_JIRA_COLUMN_ID && fileJiraMcpSucceeded(snap.log))
+    ) {
       notifyMcpSeenAt = await ensureNotifyMcpSeenAt(sessionDir);
     }
     const verdict = evaluateLongSessionPoll(snap, {

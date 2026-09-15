@@ -53,10 +53,6 @@ export async function runWebllmStage(
     modelId: model.modelId,
   });
 
-  if (columnId === FILE_JIRA_COLUMN_ID) {
-    span.fail("File in Jira is not a WebLLM stage.");
-    return { ok: false, error: "File in Jira is not a WebLLM stage.", via, input: "" };
-  }
   if (blocked) {
     span.fail(blocked);
     return { ok: false, error: blocked, via, input: "" };
@@ -94,7 +90,11 @@ export async function runWebllmStage(
     },
   });
 
-  const useDemo = !live.ok && (execution?.demoFallbacks ?? true) && columnId !== SEND_SLACK_COLUMN_ID;
+  const useDemo =
+    !live.ok &&
+    (execution?.demoFallbacks ?? true) &&
+    columnId !== SEND_SLACK_COLUMN_ID &&
+    columnId !== FILE_JIRA_COLUMN_ID;
   if (!live.ok && !useDemo) {
     span.fail(live.error || "WebLLM failed", { via: live.via });
     return { ok: false, error: live.error || "WebLLM failed", via: live.via, input };

@@ -17,6 +17,7 @@ import {
 import { fallbackFor } from "./agent-fallbacks";
 import { resolveStageCli } from "./agents";
 import { formatKindlingTerminalTitle, stripThinkBlocks } from "./cli-session";
+import { extractFileJiraMcpResult, jiraProjectFromKey } from "./discovery-jira";
 import { createDefaultExecution } from "./team-config";
 import { clip, getLogBuffer, getLogLevel, startCall } from "./logger";
 
@@ -33,7 +34,7 @@ export type AgentResult =
       plan?: Plan;
       slack?: SlackPost;
       jira?: JiraIssue[];
-      fry?: { frontierEmpty: boolean; questions: FryQuestion[] };
+      fry?: { frontierEmpty: boolean; questions: FryQuestion[]; conclusions?: string };
       via?: string;
       usage?: { inputTokens: number; outputTokens: number; estimated: boolean };
       sessionDir?: string;
@@ -88,6 +89,7 @@ export type AgentInput = {
   jira?: JiraConnection;
   jiraKeys?: string[];
   jiraIssues?: LinkedJira[];
+  jiraComponents?: string;
   columns?: WorkflowColumn[];
   promptOverride?: StagePayload;
 };
@@ -115,7 +117,9 @@ export function extractPlan(text: string): Plan | undefined {
   return candidate ? parsePlanJson(candidate) : undefined;
 }
 
-export function extractFry(text: string): { frontierEmpty: boolean; questions: FryQuestion[] } | undefined {
+export function extractFry(
+  text: string,
+): { frontierEmpty: boolean; questions: FryQuestion[]; conclusions?: string } | undefined {
   const fence = text.match(/```json\s*([\s\S]*?)```/);
   const raw = fence?.[1]?.trim() ?? (text.trim().startsWith("{") ? text.trim() : "");
   if (!raw) return undefined;
@@ -132,7 +136,12 @@ export function extractFry(text: string): { frontierEmpty: boolean; questions: F
       answer: "",
       source: q.source ? String(q.source) : "spec",
     }));
-    return { frontierEmpty: Boolean(parsed.frontierEmpty), questions };
+    const conclusions = typeof parsed.conclusions === "string" ? parsed.conclusions.trim() : "";
+    return {
+      frontierEmpty: Boolean(parsed.frontierEmpty),
+      questions,
+      ...(conclusions ? { conclusions } : {}),
+    };
   } catch {
     return undefined;
   }
@@ -151,25 +160,29 @@ async function resolveStagePayload(data: AgentInput): Promise<{
     jira,
     jiraKeys = [],
     jiraIssues = [],
+    jiraComponents,
     columns = COLUMNS,
     promptOverride,
   } = data;
   const issues = await resolveJiraIssues(ticket.linkedJiras ?? [], jiraIssues, jiraKeys, jira);
-  const promptTicket = { ...ticket, linkedJiras: issues };
-  const fromFlow = resolveFlowStagePrompt(columnId, promptTicket, docs, { frySubmit, promptTemplate });
+  const project = (jira?.project || "").trim().toUpperCase() || jiraProjectFromKey(ticket.key);
+  const team = { jiraComponents };
+  const promptTicket = {
+    ...ticket,
+    linkedJiras: issues,
+    vars: {
+      ...ticket.vars,
+      ...(project && !ticket.vars?.jiraProject ? { jiraProject: project } : {}),
+    },
+  };
+  const fromFlow = resolveFlowStagePrompt(columnId, promptTicket, docs, { frySubmit, promptTemplate, team });
   let prompt: { system: string; user: string; max: number };
 
   if (fromFlow) {
     prompt = fromFlow;
-  } else if (columnId === FILE_JIRA_COLUMN_ID) {
-    prompt = {
-      max: 4000,
-      system: promptTemplate || "Create Jira issues from the approved plan only.",
-      user: ticket.plan ? JSON.stringify(ticket.plan, null, 2) : "(no approved plan)",
-    };
   } else {
     const col = columnById(columnId, columns);
-    const ctx = buildContext(promptTicket, docs);
+    const ctx = buildContext(promptTicket, docs, team);
     const template = promptTemplate || col?.promptTemplate || "";
     prompt = {
       max: 4000,
@@ -223,48 +236,6 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
           blocked: "no approved plan",
         };
       }
-      let filingPlan = ticket.plan;
-      try {
-        const edited = JSON.parse(prompt.user) as Plan;
-        if (Array.isArray(edited.steps)) filingPlan = edited;
-      } catch {
-        span.fail("Edited Jira payload must be valid plan JSON");
-        return {
-          ok: false,
-          error: "Edited Jira payload must be valid plan JSON",
-          input,
-        };
-      }
-      if (!filingPlan.steps.length) {
-        span.fail("no approved plan", { via: "file-jira", blocked: true });
-        return {
-          ok: true,
-          text: "",
-          input,
-          summary: "Blocked",
-          spend: 0,
-          runId,
-          blocked: "no approved plan",
-        };
-      }
-      const base = Number(ticket.key.split("-")[1] || "800");
-      let n = base + 12;
-      const jira: JiraIssue[] = filingPlan.steps.map((step) => {
-        n += 1;
-        const kind = step.title.toLowerCase().startsWith("epic") ? "epic" : "story";
-        return { key: `X2-${n}`, title: step.title, kind };
-      });
-      const text = jira.map((j) => `${j.key}  ${j.title}`).join("\n");
-      span.ok({ via: "file-jira", issues: jira.length });
-      return {
-        ok: true,
-        text: `Created:\n${text}`,
-        input,
-        summary: `Filed ${jira.length} issues`,
-        spend: 0,
-        runId,
-        jira,
-      };
     }
 
     if (columnId === SEND_SLACK_COLUMN_ID) {
@@ -283,19 +254,20 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
 
     const stageCol = columnById(columnId, data.columns);
     const terminalTitle = stageCol ? formatKindlingTerminalTitle(stageCol.label) : undefined;
-    const notifyExecution: ExecutionConfig | undefined =
-      columnId === SEND_SLACK_COLUMN_ID
-        ? { ...(execution ?? createDefaultExecution()), demoFallbacks: false }
-        : execution;
+    const mcpStage = columnId === SEND_SLACK_COLUMN_ID || columnId === FILE_JIRA_COLUMN_ID;
+    const mcpExecution: ExecutionConfig | undefined = mcpStage
+      ? { ...(execution ?? createDefaultExecution()), demoFallbacks: false }
+      : execution;
+    const mcpAgent: StepAgent | undefined = columnId === FILE_JIRA_COLUMN_ID ? "cursor" : stepAgent;
 
     const { runModel } = await import("./execution.server");
     const live = await runModel({
       system: prompt.system,
       user: prompt.user,
       maxTokens: prompt.max,
-      execution: notifyExecution,
+      execution: mcpExecution,
       promptId,
-      stepAgent,
+      stepAgent: mcpAgent,
       cliMode: resolveStageCli(stageCol),
       terminalTitle,
     });
@@ -315,9 +287,9 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
     const fb = fallbackFor(ticket, columnId, frySubmit);
     const timedOut = !live.ok && /^Timed out after/.test(live.error || "");
     const useDemo =
-      columnId === SEND_SLACK_COLUMN_ID || timedOut
+      mcpStage || timedOut
         ? false
-        : !live.ok && (notifyExecution?.demoFallbacks ?? execution?.demoFallbacks ?? true);
+        : !live.ok && (mcpExecution?.demoFallbacks ?? execution?.demoFallbacks ?? true);
     if (!live.ok && !useDemo) {
       span.fail(live.error || "Agent failed", { via: live.via });
       return { ok: false, error: live.error || "Agent failed", via: live.via, input };
@@ -328,6 +300,14 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
 
     const plan = columnId === WRITE_PLAN_COLUMN_ID ? extractPlan(text) ?? fb.plan : undefined;
     const fry = isFryStage(columnId) ? extractFry(text) ?? fb.fry : undefined;
+    const filed =
+      columnId === FILE_JIRA_COLUMN_ID
+        ? extractFileJiraMcpResult(text, ticket.plan, {
+            project: jiraProjectFromKey(ticket.key) || data.jira?.project,
+            excludeKeys: [ticket.key, ...(ticket.linkedJiras ?? []).map((issue) => issue.key)],
+          })
+        : undefined;
+    const jira: JiraIssue[] | undefined = filed?.issues.length ? filed.issues : undefined;
 
     const summary =
       isFryStage(columnId)
@@ -340,18 +320,23 @@ export const runDiscoveryAgent = createServerFn({ method: "POST" })
             ? "Spec synthesized"
             : columnId === SEND_SLACK_COLUMN_ID
               ? "Notify run"
-              : "Agent response";
+              : columnId === FILE_JIRA_COLUMN_ID
+                ? jira?.length
+                  ? `Filed ${jira.length} Jira issues`
+                  : "File Jira run"
+                : "Agent response";
 
-    span.ok({ via, chars: text.length, demo: via === "demo" });
+    span.ok({ via, chars: text.length, demo: via === "demo", issues: jira?.length });
     return {
       ok: true,
-      text,
+      text: filed?.found ? filed.display : text,
       input,
       summary,
       spend,
       runId,
       plan,
       fry,
+      jira,
       via,
       usage: live.ok && !useDemo ? live.usage : undefined,
     };

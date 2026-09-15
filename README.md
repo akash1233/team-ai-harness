@@ -1,166 +1,109 @@
 # Kindling
 
-Spark to spec. A team workspace that runs a Discovery pipeline with **Cursor**, **Claude**, **GenAI Studio**, or **CIS**. Stages publish variables. Fry Me interviews the spec. Spend is token-priced.
+A team board that turns a discovery conversation into a spec, a plan, and Jira issues. Each stage can run **Cursor**, **Claude**, **GenAI Studio**, **CIS**, or in-browser **WebLLM**.
 
-Repo: [github.com/akash1233/team-ai-harness](https://github.com/akash1233/team-ai-harness)
+Work stays on your machine (`localStorage`). It is not shared across laptops.
 
-## Quick start (Mac)
+## Run it
 
-Need Node 22+ and Homebrew if you do not already have them.
+Need Node 22+ (Homebrew on a Mac).
 
 ```bash
-brew install node@22
-echo 'export PATH="/opt/homebrew/opt/node@22/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
-
-git clone https://github.com/akash1233/team-ai-harness.git kindling
+git clone ghegit@ghe.megaleo.com:workday/kindling.git
 cd kindling
-cp .env.example .env.local
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-Open [http://localhost:8080](http://localhost:8080). Chrome or Edge for Fry Me voice.
+Open [http://localhost:8080](http://localhost:8080) in Chrome or Edge (needed for Fry Me voice).
 
-Click the green **Settings** control in the header. Every workspace option lives there.
+Start `npm run dev` from **Terminal**, not Finder or a GUI-launched editor — otherwise Cursor/Claude will look missing on PATH.
 
-## Settings (all of it)
+Mac and org agent setup: [docs/SETUP.md](docs/SETUP.md).
 
-The **Settings** gear in the header is the control plane. Nothing about the pipeline is hardcoded for the team except starter defaults.
+## Pipelines
 
-| Tab | What you configure |
+**Quick spec** is the default. Paste a transcript, then spec → Fry Me → plan → File Jira → Done. Defined in [`flows/quick-spec.flow.json`](flows/quick-spec.flow.json).
+
+**Discovery** is the longer path (Brief → Agenda → Slack → then the same transcript-to-Jira stages). Defined in [`flows/discovery.flow.json`](flows/discovery.flow.json).
+
+Switch flows in the header **Flow** menu. Tickets stay on the flow they were created in. **Settings → Pipeline** edits last for this session only; persist real changes in those JSON files. Variable catalog: [`flows/README.md`](flows/README.md).
+
+## Try it
+
+1. Open **Settings** (gear in the header) → **Execution**. Install Cursor CLI and/or Claude Code, then **Test Cursor** / **Test Claude**. Uncheck demo fallbacks for real runs.
+2. **Team** — people, Slack channel + ID, Jira prefix.
+3. **Connect** — Jira / GitHub Enterprise PATs if you want live issues and repos on a ticket.
+4. On the board, open the sample ticket. Paste a Sana transcript → **Save & advance**.
+5. Run each stage in order. Review and Fry Me are human gates. File Jira opens Terminal so you can approve `jira-ghe` tool calls.
+
+**Working as** in the header is who answers Fry Me.
+
+**Reset** in the header restores one empty sample ticket at Add Sana Transcript. It does not change team settings.
+
+## Test one stage
+
+Use this when you want to exercise Agenda, Spec, Fry Me, Plan, or File Jira without walking the whole pipeline.
+
+1. Drag the ticket onto that column (or run the pipeline up to it).
+2. Check **Test this stage** on the ticket panel, or **Settings → Pipeline → Test** on that step.
+3. The panel lists every `{{variable}}` the stage reads, seeded from last stages. Edit any field to override.
+4. Run. The ticket **stays on this stage** — it will not auto-advance.
+
+**Reset from last stages** clears overrides. Uncheck Test when you want the normal pipeline again. The Test flag is session-only.
+
+## Agents
+
+| Stage (defaults) | Who runs it |
 | --- | --- |
-| **Team** | Name, Jira prefix, Slack channel, **people** (name / handle / role), labels |
-| **Flows** | Multiple pipelines. Add, duplicate, delete. Auto-advance and auto-run |
-| **Pipeline** | Ordered stages: name, what it does, who runs it, **which prompt**, variable it publishes |
-| **Prompts** | Prompt library. Add prompt, paste skills into the body, or attach Skills. Stages pick one |
-| **Skills** | Skill/doc library. Prompts check which skills to append on run |
-| **Connect** | Jira + GitHub Enterprise hosts and **PATs**. Sync issues/repos; drop a key or repo on a ticket (`{{jira.key}}`, `{{repo}}`) |
-| **Prompts** | Prompt templates (`{{spec}}`, `{{fryme}}`, …) and per-stage Studio prompt IDs |
-| **Docs** | Fry Me skill + notes Fry Me reads |
-| **Execution** | Default agent, Cursor/Claude local vs remote, Studio/CIS, **Test Cursor / Test Claude**, MCP list, **token pricing** |
-| **Look** | Vertical vs horizontal board, theme, density, show spend |
+| Agenda, Spec, Plan | Cursor, print (one-shot) |
+| Notify, File Jira | Cursor, TUI (approve tools in Terminal) |
+| Fry Me | Claude, print |
+| Brief, transcript | You |
 
-Env vars in [`.env.example`](.env.example) override Execution. Full Mac/agent matrix: [docs/SETUP.md](docs/SETUP.md).
+**Settings → Pipeline** can pin a different agent per stage for this session. **Inherit** uses **Settings → Execution** (or `DEFAULT_AGENT` in `.env`).
 
-## Spend ($)
+Notify needs **slack-mcp** on Cursor. File Jira needs **jira-ghe** (`createNewJiraTicket`). Use **Settings → Execution → Test Cursor MCP**. Close the Terminal window when the agent is done, or **Done — harvest & continue** on the ticket.
 
-Each agent call adds dollars to the ticket. Rates are **Settings → Execution → Token pricing** (USD per million tokens).
+Cursor binary should be `cursor-agent`, not `agent` (that is often Grok). Details: [docs/SETUP.md](docs/SETUP.md).
 
-- **Studio / CIS / HTTP sidecar:** uses `usage.input_tokens` / `output_tokens` (Anthropic), `prompt_tokens` / `completion_tokens` (OpenAI), or `inputTokens` / `outputTokens` (Bedrock).
-- **Local Cursor / Claude CLI:** no usage object, so tokens are estimated as `characters / chars-per-token` (default 4).
-- **Demo fallbacks:** $0 — canned text is not billed.
+## Settings
 
-Shipped defaults match Anthropic list prices (Aug 2026):
-
-| Agent | Input / MTok | Output / MTok |
-| --- | --- | --- |
-| Claude, Cursor, Studio | $2 | $10 (Sonnet 5) |
-| CIS | $1 | $5 (Haiku 4.5, the CIS default model) |
-
-Formula: `(inputTokens × inputRate + outputTokens × outputRate) / 1_000_000`. Change the rates if your org uses Opus, Haiku, or a different Cursor model. Header total is the sum of tickets. Each run log line shows `$` and token counts.
-
-## Hook up Cursor / Claude on a Mac
-
-The harness spawns a CLI. Until `agent` or `claude` is on PATH, **Settings → Execution → Test Cursor** / **Test Claude** will fail the CLI check.
-
-**Cursor Agent**
-
-```bash
-curl https://cursor.com/install -fsS | bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
-which agent || which cursor-agent
-agent --version
-```
-
-If only `cursor-agent` exists, set Cursor command to `cursor-agent -p --output-format text`.
-
-**Tests** use print mode (`-p`) so they exit. **Pipeline stages** open a long Terminal TUI (`script -q -F`, prompt via `$(cat prompt.md)`, Claude `--session-id`, Cursor `--workspace` / `--resume`). Close the window when the agent is done; Kindling tails the log and continues the flow. Harvest & continue is on the ticket if you want to take the log without waiting.
-
-**Claude Code**
-
-```bash
-curl -fsSL https://claude.ai/install.sh | bash
-# or: brew install --cask claude-code
-which claude && claude --version
-```
-
-Then restart `npm run dev` **from that Terminal**, Test Cursor and Test Claude, uncheck demo fallbacks. Uncheck connectivity-only to send your prompt on Haiku / Composer. **Test Claude MCP** runs `claude mcp list`.
-
-## Flows and variables
-
-A workspace can run **multiple flows**. Switch them in the header or Settings → Flows. Tickets stay on the flow they were created in.
-
-**Discovery source of truth:** [`flows/discovery.flow.json`](flows/discovery.flow.json) — stage list, agents, and `prompt.system` / `prompt.user`. Settings → Pipeline / Prompts edits are session-only and wiped on reload; keep changes in that JSON. Full variable catalog: [`flows/README.md`](flows/README.md). Loader: `src/lib/flow-spec.ts`.
-
-Each stage publishes a named value. Later prompts interpolate it **only when the token appears in the stage prompt**:
-
-| Token | Source |
+| Tab | What it is |
 | --- | --- |
-| `{{slackChannel}}` | Brief — defaults from **Settings → Team**; saved into pipeline vars on Brief |
-| `{{slackChannelId}}` | Brief — team default channel ID; saved into pipeline vars on Brief |
-| `{{slackMessage}}` | Notify — pre-synced on stage entry; Cursor CLI posts via **slack-mcp** |
-| `{{slack_post}}` | Notify — agent reply / post receipt after Cursor run |
-| `{{brief}}` | Brief / ideation |
-| `{{agenda}}` | Agenda |
-| `{{transcript}}` | Meeting notes |
-| `{{spec}}` | Synthesize |
-| `{{fryme}}` | Fry Me answers |
-| `{{plan}}` | Backlog plan |
-| `{{prev}}` | Previous stage output |
-| `{{ticket.title}}` | Ticket fields |
+| **Team** | Name, Jira prefix, Jira components, Slack channel / ID, people, labels |
+| **Flows** | Pipelines, auto-advance, auto-run, continue-into-another-flow |
+| **Pipeline** | Stage order, agent, print vs TUI, prompt, published variable, **Test** |
+| **Prompts** | Prompt library. Stages pick one. Skills can be attached |
+| **Skills** | Docs Fry Me (and other prompts) can append |
+| **Connect** | Jira + GitHub Enterprise hosts and PATs |
+| **WebLLM** | In-browser models |
+| **Execution** | Default agent, CLI commands, Studio / CIS, MCP tests, token pricing |
+| **Look** | Vertical vs horizontal board (default: vertical), theme, density, spend |
 
-With **Keep running agent stages** on, a successful run skips review gates and starts the next agent until notes, Fry Me questions, or sign-off.
+`.env` / `.env.local` override Execution. Restart `npm run dev` after env changes. Jira and GitHub PATs are Connect only, not env.
 
-## Per-stage agents
+## Spend
 
-**Settings → Pipeline** pins the agent on each runnable stage for this session only. **Inherit** uses the workspace default. Boot-time defaults come from the flow JSON.
+Each agent call adds dollars to the ticket. Rates: **Settings → Execution → Token pricing**.
 
-Discovery **continues into Quick spec** when a ticket hits Done (Settings → Flows). Vars travel with the ticket. Spec on Quick spec is Studio again, with the same `{{brief}}` `{{spec}}` `{{fryme}}`.
+- Studio / CIS / HTTP: billed from the API usage object.
+- Local Cursor / Claude: estimated as characters ÷ 4 (default).
+- Demo fallbacks and WebLLM: $0.
 
-## Fry Me
+Header total is the sum of tickets. Each run log line shows `$` and token counts.
 
-1. Run **Spec**.
-2. Open **Fry Me**. Start Fry Me — questions come from the spec plus **Settings → Docs**.
-3. Header **Working as** is who you are. Answer: type, rec, or mic.
-4. Submit the round. Write plan treats those answers as binding.
+## State
 
-## Layout (modules)
-
-```
-src/components/studio/           Board chrome
-  Studio.tsx                     Header, layout switch, Settings
-  StageRail.tsx / TicketList.tsx Vertical pipeline
-  PipelineBoard.tsx / TicketNote Horizontal sticky-note board
-  RunLog.tsx                     Agent output + spend + tokens
-  GrillRoom.tsx                  Collaborative Fry Me
-  settings/                      Settings tabs helpers
-    field.tsx                    Shared fields
-    PricingFields.tsx            Token rates UI
-  TeamSettings.tsx               Settings shell + tabs
-
-src/lib/
-  types.ts                       Shared types
-  team-config.ts                 Defaults + merge (localStorage)
-  columns.ts                     Discovery / Quick spec stages + prompts
-  flow-context.ts                {{var}} interpolate / harvest
-  agents.ts                      Resolve Cursor/Claude/Studio/CIS per stage
-  execution.server.ts            Spawn CLI, HTTP, Studio, CIS
-  pricing.ts                     Token usage + USD
-  discovery-agent.ts             Per-stage prompts → runModel
-  grill.ts / grill-skill.ts      Fry Me parse + skill doc
-  board-store.ts                 Zustand persistence
-```
-
-Workspace state: `localStorage` key `kindling-v1`. **Reset** restores one empty sample ticket at Brief (Slack channel/ID from team settings). **Settings → Look → Restore default team** restores pipeline defaults.
+Browser `localStorage` key `kindling-v1`. Not synced. Two people on two Macs do not share a board.
 
 ## Scripts
 
 | Command | What it does |
 | --- | --- |
 | `npm run dev` | Dev server on `0.0.0.0:8080` |
+| `npm test` | Node tests |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Node tests (agents, grill, flow-context, **pricing**) |
 | `npm run build` | Production build |
 | `npm run preview` | Serve the production build |

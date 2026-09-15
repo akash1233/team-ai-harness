@@ -1,4 +1,5 @@
 import {
+  FILE_JIRA_COLUMN_ID,
   FRY_COLUMN_ID,
   IDEATION_COLUMN_ID,
   isFryStage,
@@ -7,9 +8,10 @@ import {
   SEND_SLACK_COLUMN_ID,
   TRANSCRIPT_COLUMN_ID,
 } from "./columns.ts";
+import { formatFiledJiraDisplay, jiraProjectFromKey } from "./discovery-jira.ts";
 import { composeSlackMessage, normalizeSlackChannelName, resolveAgendaDocument } from "./discovery-slack.ts";
-import { formatFryRecord } from "./grill.ts";
-import type { TeamDoc, Ticket, WorkflowColumn } from "./types";
+import { formatFryRecord, fryQuestionVars, isFryVarKey, stripFryVars } from "./grill.ts";
+import type { JiraIssue, TeamDoc, Ticket, WorkflowColumn } from "./types";
 
 const TOKEN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
 
@@ -45,6 +47,18 @@ export function applyFryAliases(vars: Record<string, string>, body: string): Rec
   return vars;
 }
 
+/** Persist the full Q&A record plus per-question vars for later stages. */
+export function harvestFryVars(ticket: Ticket): Record<string, string> {
+  const vars = stripFryVars(ticket.vars ?? {});
+  const record = formatFryRecord(ticket);
+  if (record) {
+    applyFryAliases(vars, record);
+    vars.prev = record;
+  }
+  Object.assign(vars, fryQuestionVars(ticket));
+  return vars;
+}
+
 export function harvestVars(
   ticket: Ticket,
   column: WorkflowColumn | undefined,
@@ -58,7 +72,10 @@ export function harvestVars(
   vars[column.id] = body;
   vars[canonicalId] = body;
   if (name) vars[name] = body;
-  if (isFryStage(column.id) || name === "fryme" || name === "grill") applyFryAliases(vars, body);
+  if (isFryStage(column.id) || name === "fryme" || name === "grill") {
+    applyFryAliases(vars, body);
+    Object.assign(vars, fryQuestionVars(ticket));
+  }
   vars.prev = body;
   return vars;
 }
@@ -114,7 +131,10 @@ export function harvestReviewVars(
   vars[sourceColumn.id] = body;
   vars[migrateColumnId(sourceColumn.id)] = body;
   if (sourceKey) vars[sourceKey] = body;
-  if (isFryStage(sourceColumn.id) || sourceKey === "fryme" || sourceKey === "grill") applyFryAliases(vars, body);
+  if (isFryStage(sourceColumn.id) || sourceKey === "fryme" || sourceKey === "grill") {
+    applyFryAliases(vars, body);
+    Object.assign(vars, fryQuestionVars(ticket));
+  }
   return vars;
 }
 
@@ -184,6 +204,23 @@ export function harvestNotifyVars(
   };
 }
 
+/** Records created epics/stories after a jira-ghe File Jira harvest. */
+export function harvestFileJiraVars(
+  ticket: Ticket,
+  column: WorkflowColumn | undefined,
+  issues: JiraIssue[],
+  display: string,
+): Record<string, string> {
+  const body = (issues.length ? formatFiledJiraDisplay(issues) : display).trim();
+  const base = harvestVars(ticket, column, body || display);
+  return {
+    ...base,
+    [FILE_JIRA_COLUMN_ID]: body,
+    jira_filed: body,
+    prev: body,
+  };
+}
+
 /** Text a human stage publishes when runTicket captures without an agent. */
 export function readManualOutput(ticket: Ticket, column: WorkflowColumn): string {
   if (column.id === IDEATION_COLUMN_ID) {
@@ -210,7 +247,11 @@ export function readManualOutput(ticket: Ticket, column: WorkflowColumn): string
   ).trim();
 }
 
-export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, string> {
+export type TeamContextDefaults = {
+  jiraComponents?: string;
+};
+
+export function buildContext(ticket: Ticket, docs?: TeamDoc[], team?: TeamContextDefaults): Record<string, string> {
   const fryme = formatFryRecord(ticket);
   const jiras = ticket.linkedJiras ?? [];
   const ctx: Record<string, string> = {
@@ -229,12 +270,16 @@ export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, s
     fyyme: "",
     fry: "",
     plan: "",
+    jiraProject: "",
+    jiraComponents: "",
+    jira_filed: "",
     jira: "",
     repo: "",
     input: ticket.vars?.input ?? "",
     prev: "",
     ...ticket.outputs,
     ...ticket.vars,
+    ...(ticket.stageTestVars ?? {}),
   };
 
   ctx.brief =
@@ -266,11 +311,18 @@ export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, s
   ctx.grill = ctx.fryme;
   ctx.fyyme = ctx.fryme;
   ctx.fry = ctx.fryme;
+  Object.assign(ctx, fryQuestionVars(ticket));
   ctx.plan =
     ctx.plan ||
     (ticket.plan ? JSON.stringify(ticket.plan, null, 2) : "") ||
     ticket.outputs["write-plan"] ||
     "";
+  ctx.jiraProject = ctx.jiraProject || jiraProjectFromKey(ticket.key);
+  ctx.jiraComponents = ctx.jiraComponents || team?.jiraComponents?.trim() || "";
+  ctx.jira_filed =
+    ctx.jira_filed ||
+    ticket.outputs[FILE_JIRA_COLUMN_ID] ||
+    (ticket.jiraCreated.length ? formatFiledJiraDisplay(ticket.jiraCreated) : "");
   ctx.jira = jiras.length
     ? jiras.map((issue) => `${issue.key} ${issue.title}\n${issue.description}`.trim()).join("\n\n")
     : ticket.jiraCreated.map((j) => `${j.key} ${j.title}`).join("\n") ||
@@ -307,6 +359,7 @@ export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, s
     ctx["repo.description"] = ticket.linkedRepo.description;
   }
   ctx.prev = ctx.prev || "";
+  if (ticket.stageTestVars) Object.assign(ctx, ticket.stageTestVars);
 
   if (docs?.length) {
     ctx.docs = docs.map((d) => `### ${d.title} (${d.kind})\n${d.body}`).join("\n\n");
@@ -317,7 +370,15 @@ export function buildContext(ticket: Ticket, docs?: TeamDoc[]): Record<string, s
   ctx.context = Object.entries(ctx)
     .filter(([k, v]) => {
       const body = v.trim();
-      if (!body || skip.has(k) || k.startsWith("ticket.") || (k.startsWith("jira.") && k !== "jira")) return false;
+      if (
+        !body ||
+        skip.has(k) ||
+        k.startsWith("ticket.") ||
+        (isFryVarKey(k) && k !== "fryme") ||
+        (k.startsWith("jira.") && k !== "jira")
+      ) {
+        return false;
+      }
       if (seen.has(body)) return false;
       seen.add(body);
       return true;

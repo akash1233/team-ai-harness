@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assignQuestions, answeredCount, formatFryRecord, fryConclusions } from "./grill.ts";
+import { assignQuestions, answeredCount, flattenFryQa, formatFryRecord, fryConclusions, fryQuestionVars } from "./grill.ts";
+import { harvestFryVars } from "./flow-context.ts";
+import { beginStageRun } from "./sample-data.ts";
+import { COLUMNS } from "./columns.ts";
 import { migrateTicketFry, type LegacyTicket } from "./fry-migrate.ts";
 import type { FryQuestion, Ticket } from "./types.ts";
 
@@ -122,8 +125,8 @@ test("migrateTicketFry copies preview-fry output and vars.fry", () => {
 });
 
 test("fryConclusions reads fryme first and falls back to fry", () => {
-  assert.equal(fryConclusions({ outputs: { fryme: "new", fry: "old" } } as Ticket), "new");
-  assert.equal(fryConclusions({ outputs: { fry: "old" } } as Ticket), "old");
+  assert.equal(fryConclusions({ outputs: { fryme: "new", fry: "old" }, vars: {} }), "new");
+  assert.equal(fryConclusions({ outputs: { fry: "old" }, vars: {} }), "old");
 });
 
 test("answeredCount ignores whitespace", () => {
@@ -132,4 +135,85 @@ test("answeredCount ignores whitespace", () => {
     { n: 2, question: "b", recommended: "r", answer: "   " },
   ];
   assert.equal(answeredCount(qs), 1);
+});
+
+test("harvestFryVars publishes per-question output vars and the full Q&A record", () => {
+  const ticket = {
+    outputs: { fryme: "Honor the registry pin." },
+    vars: {},
+    fryComplete: true,
+    fryRounds: [
+      {
+        id: "r1",
+        submitted: true,
+        questions: [
+          {
+            n: 1,
+            question: "Where do prompts live?",
+            recommended: "Registry",
+            answer: "Registry keyed by column",
+            source: "Architecture & Design Decisions",
+            answeredBy: "Maya Chen",
+          },
+        ],
+      },
+      {
+        id: "r2",
+        submitted: true,
+        questions: [
+          {
+            n: 1,
+            question: "Is a migration required?",
+            recommended: "No — new registry only.",
+            answer: "No migration",
+            source: "Data Model & Storage",
+          },
+        ],
+      },
+    ],
+  } as unknown as Ticket;
+  const items = flattenFryQa(ticket);
+  assert.equal(items.length, 2);
+  assert.equal(items[1]?.n, 2);
+  assert.equal(items[1]?.round, 2);
+  const vars = harvestFryVars(ticket);
+  assert.match(vars.fryme, /Where do prompts live/);
+  assert.match(vars.fryme, /Registry keyed by column/);
+  assert.match(vars.fryme, /No migration/);
+  assert.equal(vars["fryme.1.question"], "Where do prompts live?");
+  assert.equal(vars["fryme.1.answer"], "Registry keyed by column");
+  assert.equal(vars["fryme.2.answer"], "No migration");
+  assert.equal(vars["fryme.conclusions"], "Honor the registry pin.");
+  assert.match(vars["fryme.qa"] ?? "", /"answer": "Registry keyed by column"/);
+  assert.equal(fryQuestionVars(ticket)["fryme.1.source"], "Architecture & Design Decisions");
+});
+
+test("beginStageRun keeps Fry Me Q&A vars between rounds and clears them on a fresh start", () => {
+  const col = COLUMNS.find((c) => c.id === "fryme")!;
+  const ticket = {
+    outputs: { fryme: "" },
+    vars: {
+      fryme: "Round 1 record",
+      "fryme.1.question": "Where do prompts live?",
+      "fryme.1.answer": "Registry",
+      spec: "keep spec",
+    },
+    fryComplete: false,
+    fryRounds: [
+      {
+        id: "r1",
+        submitted: true,
+        questions: [{ n: 1, question: "Where do prompts live?", recommended: "Registry", answer: "Registry" }],
+      },
+    ],
+  } as unknown as Ticket;
+  const kept = beginStageRun(ticket, col, { keepFryRounds: true });
+  assert.equal(kept.vars["fryme.1.answer"], "Registry");
+  assert.equal(kept.vars.fryme, "Round 1 record");
+  assert.equal(kept.fryRounds.length, 1);
+  const fresh = beginStageRun(ticket, col);
+  assert.equal(fresh.vars["fryme.1.answer"], undefined);
+  assert.equal(fresh.vars.fryme, undefined);
+  assert.equal(fresh.vars.spec, "keep spec");
+  assert.equal(fresh.fryRounds.length, 0);
 });

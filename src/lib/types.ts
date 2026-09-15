@@ -190,6 +190,11 @@ export type WorkflowColumn = {
   outputKey?: string;
   /** Library prompt this stage runs. */
   promptRef?: string;
+  /**
+   * Stage test: run this step alone. Work panel seeds {{vars}} from last stages
+   * (or lets you type/override) and does not auto-advance after the run.
+   */
+  testMode?: boolean;
   enabled: boolean;
   locked?: boolean;
   custom?: boolean;
@@ -237,6 +242,8 @@ export type TeamConfig = {
   name: string;
   workflowName: string;
   jiraPrefix: string;
+  /** Comma-separated Jira component names for createNewJiraTicket ({{jiraComponents}}). */
+  jiraComponents: string;
   defaultSlackChannel: string;
   defaultSlackChannelId: string;
   members: TeamMember[];
@@ -277,6 +284,8 @@ export type Ticket = {
   outputs: Record<string, string>;
   /** Named values published by completed stages. Prompts read these as {{name}}. */
   vars: Record<string, string>;
+  /** Input overrides while the current stage is in test mode. */
+  stageTestVars?: Record<string, string>;
   agentResponses: AgentResponse[];
   fryRounds: FryRound[];
   fryComplete: boolean;

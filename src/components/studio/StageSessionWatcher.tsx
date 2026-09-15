@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useBoardStore } from "@/lib/board-store";
-import { SEND_SLACK_COLUMN_ID } from "@/lib/columns";
+import { FILE_JIRA_COLUMN_ID, SEND_SLACK_COLUMN_ID } from "@/lib/columns";
+import { extractFileJiraMcpResult, jiraProjectFromKey } from "@/lib/discovery-jira";
 import { extractNotifyMcpResult } from "@/lib/discovery-slack";
 import { testExecution } from "@/lib/discovery-agent";
 
@@ -33,6 +34,12 @@ export function StageSessionWatcher() {
           if (poll.log) {
             if (t.columnId === SEND_SLACK_COLUMN_ID) {
               const mcp = extractNotifyMcpResult(poll.log);
+              patchLiveLog(t.id, mcp.found ? mcp.display : poll.log);
+            } else if (t.columnId === FILE_JIRA_COLUMN_ID) {
+              const mcp = extractFileJiraMcpResult(poll.log, t.plan, {
+                project: jiraProjectFromKey(t.key),
+                excludeKeys: [t.key, ...(t.linkedJiras ?? []).map((issue) => issue.key)],
+              });
               patchLiveLog(t.id, mcp.found ? mcp.display : poll.log);
             } else {
               patchLiveLog(t.id, poll.log);

@@ -1,4 +1,4 @@
-import { SEND_SLACK_COLUMN_ID } from "./columns.ts";
+import { FILE_JIRA_COLUMN_ID, SEND_SLACK_COLUMN_ID } from "./columns.ts";
 import type { ExecutionConfig, WebllmProfile, WorkflowColumn } from "./types.ts";
 
 export type WebllmProfileSpec = {
@@ -97,10 +97,13 @@ export function hasWebGpu(): boolean {
   return typeof navigator !== "undefined" && "gpu" in navigator;
 }
 
-/** Notify needs slack-mcp; WebLLM cannot call tools. */
+/** Notify and File Jira need MCP tools; WebLLM cannot call them. */
 export function webllmBlockedReason(columnId?: string): string | undefined {
   if (columnId === SEND_SLACK_COLUMN_ID) {
     return "Notify posts via slack-mcp. Pin this stage to Cursor.";
+  }
+  if (columnId === FILE_JIRA_COLUMN_ID) {
+    return "File Jira creates issues via jira-ghe MCP. Pin this stage to Cursor.";
   }
   return undefined;
 }
